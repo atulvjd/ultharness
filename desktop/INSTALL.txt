@@ -1,0 +1,43 @@
+Ultharness for Mac
+
+INSTALL
+Drag Ultharness.app onto Applications, then open it from Applications.
+This build is for Apple Silicon Macs running macOS 14 or later.
+
+WHAT IS INCLUDED
+The native window, dashboard, local server, and Node.js runtime are bundled.
+You do not need Terminal or a separate Node installation for the dashboard.
+Your API keys, task database, source folders, and model weights are not included.
+
+YOUR WORKSPACE
+If the browser version is already running at http://127.0.0.1:4310, the app
+connects to it, preserving that workspace. Quitting the Mac app leaves that
+separately started server running.
+
+Otherwise the Mac app starts its own local server and stores data in:
+  ~/Library/Application Support/Ultharness/workspace
+
+Use File > Connect Project Folder to choose a project. The standalone app's
+initial project is your Documents folder. Its server and schedules stop when
+you quit. Existing project-folder databases are not moved or modified.
+
+MODEL SERVICES
+Codex, Claude, OmniRoute, Ollama, their sign-ins, and local model weights are
+separate installations. The Model Services menu can start installed OmniRoute
+or Ollama. Services started by this app stop when the app quits. Services that
+were already running stay running.
+
+For a gateway key that survives standalone app restarts, create:
+  ~/Library/Application Support/Ultharness/settings.env
+with OMNIROUTE_API_KEY and, optionally, OMNIROUTE_BASE_URL. Keep that file
+private. The key form in Model routing otherwise stores keys for the session.
+The running-browser connection uses that server's existing settings instead.
+
+SIGNING
+This is an ad-hoc signed local build, not an Apple-notarized distribution.
+macOS may require explicit approval to open a downloaded copy. No security
+settings are changed by this installer.
+
+TROUBLESHOOTING
+File > Open Desktop Log shows startup errors.
+File > Open App Data Folder opens the standalone app's settings and data.

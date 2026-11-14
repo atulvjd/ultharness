@@ -1,0 +1,18 @@
+{
+  "name": "ultharness",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "A local workspace for coding agents and recurring operations.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env --watch server.mjs",
+    "gateway": "node scripts/start-omniroute.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check server.mjs && node --check routing.mjs && node --check scripts/start-omniroute.mjs && node --check public/app.js && node --check scripts/package-macos.mjs && node --check desktop/server-entry.mjs",
+    "package:mac": "node scripts/package-macos.mjs"
+  }
+}
