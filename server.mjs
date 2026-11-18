@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
+import { createDeliveryManager, connectionSettings, connectionArgs, runDeliveryChecks } from './delivery.mjs';
 import { normalizeBaseUrl, modelId, discoverModels, routingEnvironment } from './routing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -13,7 +14,8 @@ const stamp = () => new Date().toISOString();
 const id = prefix => `${prefix}_${randomUUID().slice(0, 8)}`;
 const clean = (value, max = 5000) => String(value ?? '').trim().slice(0, max);
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
-const native = kind => ['workspace', 'health'].includes(kind);
+const native = kind => ['workspace', 'health', 'verification'].includes(kind);
+const projectExclusive = kind => !['workspace', 'health'].includes(kind);
 const terminal = status => ['done', 'failed', 'cancelled'].includes(status);
 const bytes = n => `${(Number(n) / 1024 ** 3).toFixed(1)} GB`;
 
@@ -34,6 +36,8 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   };
   state.routing ??= { baseUrl: normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || 'http://127.0.0.1:20128/v1'), defaultModel: '', models: [], checkedAt: null, status: 'unchecked', error: null };
   state.workflows ??= [];
+  state.connections ??= []; state.deliveries ??= [];
+  if (!state.agents.some(a => a.id === 'agent_verify')) state.agents.push({ id: 'agent_verify', name: 'Verifier', role: 'Recorded delivery checks', kind: 'verification', description: 'Runs approved delivery file assertions and npm scripts, records output and exit codes. Scripts execute with this app’s user permissions.', color: 'blue', enabled: true, internal: true });
   // Credentials stay in server memory and are associated with a specific endpoint.
   const routingKeys = new Map();
   if (process.env.OMNIROUTE_API_KEY) routingKeys.set(state.routing.baseUrl, process.env.OMNIROUTE_API_KEY);
@@ -89,7 +93,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       tasks: state.tasks.map(task => ({ ...task, stopping: active.has(task.id) && terminal(task.status), waitReason: waitReason(task) })), routing: routingSnapshot(), agents: state.agents.map(agent => ({ ...agent,
       available: native(agent.kind) || !!executable(agent.kind),
       activeTaskId: [...active.keys()].find(taskId => getTask(taskId).agentId === agent.id) || null
-    })), server: { root: path.resolve(root), startedAt, version: '0.2.0', host: os.hostname(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
+    })), server: { root: path.resolve(root), startedAt, version: '0.3.1', host: os.hostname(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
   }
   function log(task, text, channel = 'info') {
     if (terminal(task.status)) return;
@@ -98,11 +102,12 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     task.updatedAt = stamp();
     change();
   }
-  function prepareTask(body) {
+  function prepareTask(body, internal = false) {
     const title = clean(body.title, 160);
     if (!title) throw fail('Give this task a title');
     getProject(body.projectId);
     const agent = getAgent(body.agentId);
+    if (agent.kind === 'verification' && !internal) throw fail('Verifier is managed by client deliveries');
     const routing = taskRouting(body, agent);
     if (!agent.enabled) throw fail('This agent is paused');
     if (body.parentId) getTask(body.parentId);
@@ -164,9 +169,10 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     if (task.dependsOnId && getTask(task.dependsOnId).status !== 'done') return `Waiting for UH-${String(getTask(task.dependsOnId).number).padStart(3, '0')} to finish successfully`;
     if (!getAgent(task.agentId).enabled) return 'Agent is paused';
     if (task.workflowId && !state.workflows.find(w => w.id === task.workflowId)?.enabled) return 'Workflow is paused';
+    if (state.deliveries.some(d => ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId) && projectExclusive(getAgent(task.agentId).kind)) return 'A client delivery has reserved this project';
     if (task.status === 'queued') return 'Submit this task to start';
     if ([...active.keys()].some(taskId => getTask(taskId).agentId === task.agentId)) return 'Agent is finishing another task';
-    if (!native(getAgent(task.agentId).kind) && [...active.keys()].some(taskId => { const other = getTask(taskId); return other.projectId === task.projectId && !native(getAgent(other.agentId).kind); })) return 'Another AI task is using this project';
+    if (projectExclusive(getAgent(task.agentId).kind) && [...active.keys()].some(taskId => { const other = getTask(taskId); return other.projectId === task.projectId && projectExclusive(getAgent(other.agentId).kind); })) return 'Another AI task is using this project';
     return active.size >= 2 ? 'Both runner slots are in use' : 'Waiting for the next runner slot';
   }
   function taskRouting(body, agent) {
@@ -248,6 +254,14 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     active.set(task.id, { child: null });
     event(`${agent.name} started “${task.title}”`, task.id);
     change();
+    if (agent.kind === 'verification') {
+      runDeliveryChecks({ task, root: project.path, log: value => log(task, value, 'tool'), setChild: child => { if (active.has(task.id)) active.set(task.id, { child }); }, stopped: () => closing || terminal(task.status), environment: (() => { const env = { ...process.env }; delete env.OMNIROUTE_API_KEY; delete env.ULTHARNESS_OMNIROUTE_KEY; return env; })() }).then(result => {
+        if (closing) return;
+        if (terminal(task.status)) { active.delete(task.id); change(); pump(); return; }
+        complete(task, result.content, result.passed ? null : 'Recorded verification failed. See check evidence.');
+      }).catch(err => { if (!closing) complete(task, '', err.message); });
+      return;
+    }
     if (native(agent.kind)) {
       setImmediate(() => {
         if (closing || terminal(task.status)) return;
@@ -258,7 +272,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     }
     const binary = executable(agent.kind);
     if (!binary) { complete(task, '', `${agent.kind} is not installed or is not on PATH`); return; }
-    const args = commandArgs(agent.kind, task.mode, task.routeSnapshot);
+    const args = commandArgs(agent.kind, task.mode, task.routeSnapshot, task.connections);
     const parent = task.parentId ? getTask(task.parentId) : null;
     const context = parent ? state.artifacts.filter(a => a.taskId === parent.id).slice(0, 1).map(a => a.content.slice(0, 20000)).join('\n') : '';
     const prompt = `You are ${agent.name}, working in Ultharness. Role: ${agent.role}.\nTask: ${task.title}\n${task.description}\n\n${task.mode === 'edit' ? 'Implement the requested changes within this workspace.' : 'Review and report only. Do not modify files.'}\nDo not launch or delegate to other agents. Return a clear final report describing your findings or changes and validation.\n${context ? `Parent task report:\n${context}` : ''}`;
@@ -326,6 +340,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   }
   function pump() {
     if (closing) return;
+    deliveries.advance();
     advanceWorkflows();
     const priority = { high: 0, normal: 1, low: 2 };
     const ready = state.tasks.filter(t => t.status === 'ready').sort((a, b) => priority[a.priority] - priority[b.priority] || Date.parse(a.submittedAt || a.createdAt) - Date.parse(b.submittedAt || b.createdAt) || a.number - b.number);
@@ -334,14 +349,15 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       if (task.status !== 'ready') continue;
       const agent = getAgent(task.agentId);
       if (task.workflowId && !state.workflows.find(w => w.id === task.workflowId)?.enabled) continue;
+      if (projectExclusive(agent.kind) && state.deliveries.some(d => ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId)) continue;
       if (!agent.enabled || [...active.keys()].some(taskId => getTask(taskId).agentId === agent.id)) continue;
       if (task.dependsOnId && getTask(task.dependsOnId).status !== 'done') continue;
       // Coding agents that may write share a project lock to prevent conflicting edits.
-      if (!native(agent.kind) && [...active.keys()].some(taskId => { const other = getTask(taskId); return other.projectId === task.projectId && !native(getAgent(other.agentId).kind); })) continue;
+      if (projectExclusive(agent.kind) && [...active.keys()].some(taskId => { const other = getTask(taskId); return other.projectId === task.projectId && projectExclusive(getAgent(other.agentId).kind); })) continue;
       launch(task);
     }
   }
-  function submitTask(task) {
+  function submitTask(task, cycleApproval = null) {
     if (active.has(task.id)) throw fail('The previous run is still stopping. Wait before submitting this task again.', 409);
     if (!['queued', 'failed', 'cancelled', 'done'].includes(task.status)) throw fail('This task has already been submitted', 409);
     const agent = getAgent(task.agentId);
@@ -353,10 +369,10 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     task.error = null; task.completedAt = null; task.updatedAt = stamp();
     task.submittedAt = stamp();
     delete task.usage; delete task.costUsd;
-    task.routeSnapshot = task.routing?.provider === 'omniroute' ? { ...task.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' };
-    task.status = native(agent.kind) ? 'ready' : 'approval';
-    task.approval = native(agent.kind) ? null : { requestedAt: stamp(), decidedAt: null, decision: null };
-    event(native(agent.kind) ? `Queued “${task.title}” for a local check` : `Approval requested: ${agent.name} · ${task.title}`, task.id, native(agent.kind) ? 'info' : 'warning');
+    task.routeSnapshot = cycleApproval ? (native(agent.kind) ? { provider: 'direct' } : structuredClone(cycleApproval.routeSnapshot)) : task.routing?.provider === 'omniroute' ? { ...task.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' };
+    task.status = cycleApproval || native(agent.kind) ? 'ready' : 'approval';
+    task.approval = cycleApproval ? { requestedAt: cycleApproval.at, decidedAt: cycleApproval.at, decision: 'approved', deliveryId: cycleApproval.deliveryId } : native(agent.kind) ? null : { requestedAt: stamp(), decidedAt: null, decision: null };
+    event(cycleApproval ? `Queued under your approved delivery cycle: ${task.title}` : native(agent.kind) ? `Queued “${task.title}” for a local check` : `Approval requested: ${agent.name} · ${task.title}`, task.id, cycleApproval || native(agent.kind) ? 'info' : 'warning');
     change();
   }
   function requestRun(task) {
@@ -382,6 +398,12 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       routing: taskRouting(body, agent), requireTools: !native(agent.kind) && body.requireTools === true, intervalMinutes, lane: body.lane === 'coding' ? 'coding' : 'operations',
       mode: body.mode === 'edit' ? 'edit' : 'review', priority: ['low', 'normal', 'high'].includes(body.priority) ? body.priority : 'normal' };
   }
+  function cancelManagedTask(task) {
+    task.status = 'cancelled'; task.updatedAt = stamp();
+    const child = active.get(task.id)?.child; stopProcess(child);
+    if (!child) active.delete(task.id);
+  }
+  const deliveries = createDeliveryManager({ state, getProject, getAgent, prepareTask: body => prepareTask(body, true), insertTask, submitTask, active, change, event, cancelTask: cancelManagedTask, executable });
   function tick() {
     for (const routine of state.routines) {
       if (!routine.enabled || Date.parse(routine.nextRunAt) > Date.now()) continue;
@@ -422,6 +444,11 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         res.write('data: {}\n\n'); clients.add(res); req.on('close', () => clients.delete(res)); return;
       }
+      if (req.method === 'GET' && /^\/api\/deliveries\/[^/]+\/report$/.test(route)) {
+        const delivery = deliveries.find(route.split('/')[3]);
+        res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="delivery-${delivery.id}.md"`, 'Cache-Control': 'no-store' });
+        return res.end(redact(deliveries.report(delivery)));
+      }
       if (req.method === 'GET' && route.startsWith('/api/artifacts/')) {
         const item = state.artifacts.find(a => a.id === route.split('/')[3]);
         if (!item) throw fail('Artifact not found', 404);
@@ -452,6 +479,27 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
             throw fail(err.message, err.status || 502);
           }
         }
+        if (route === '/api/connections') {
+          const connection = { ...connectionSettings(body), id: id('connection'), enabled: true, createdAt: stamp() };
+          state.connections.unshift(connection); event(`Connection saved: ${connection.name}`); change(); return json(connection, 201);
+        }
+        if (parts[1] === 'connections' && parts[2] && ['toggle', 'delete'].includes(parts[3])) {
+          const connection = state.connections.find(c => c.id === parts[2]); if (!connection) throw fail('Connection not found', 404);
+          if (parts[3] === 'delete') state.connections = state.connections.filter(c => c.id !== connection.id);
+          else connection.enabled = !connection.enabled;
+          event(`Connection ${parts[3] === 'delete' ? 'removed' : connection.enabled ? 'enabled' : 'disabled'}: ${connection.name}`); change(); return json({ ok: true });
+        }
+        if (route === '/api/deliveries') return json(deliveries.create(body), 201);
+        if (parts[1] === 'deliveries' && parts[2]) {
+          const delivery = deliveries.find(parts[2]);
+          let result;
+          if (parts[3] === 'approve') result = deliveries.approve(delivery);
+          else if (parts[3] === 'pause') result = deliveries.pause(delivery);
+          else if (parts[3] === 'accept') result = deliveries.accept(delivery);
+          else if (parts[3] === 'reject') result = deliveries.reject(delivery, body.feedback);
+          else throw fail('Unknown delivery action', 404);
+          pump(); return json(result);
+        }
         if (route === '/api/tasks') { const task = createTask(body); if (body.runNow) requestRun(task); return json(task, 201); }
         if (route === '/api/workflows') return json(createWorkflow(body), 201);
         if (parts[1] === 'workflows' && parts[2] && parts[3] === 'toggle') {
@@ -461,6 +509,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
         }
         if (parts[1] === 'tasks' && parts[2]) {
           const task = getTask(parts[2]); const action = parts[3];
+          if (task.deliveryId && ['run', 'approve', 'reject', 'requirements'].includes(action)) throw fail('This task is managed by its client delivery. Use delivery controls.', 409);
           if (action === 'run') return json(requestRun(task));
           if (action === 'requirements') {
             if (active.has(task.id) || !['queued', 'done', 'failed', 'cancelled'].includes(task.status)) throw fail('Change run requirements before submitting the task', 409);
@@ -509,6 +558,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           const name = clean(body.name ?? project.name, 80); if (!name) throw fail('Give this project a name');
           const folder = resolveDirectory(body.path ?? project.path);
           const moved = folder !== project.path;
+          if (moved && state.deliveries.some(d => d.projectId === project.id && ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status))) throw fail('Finish or stop this delivery, or request changes, before changing its folder', 409);
           if (moved && [...active.keys()].some(taskId => getTask(taskId).projectId === project.id)) throw fail('Wait for this project’s active tasks to finish before changing its folder', 409);
           Object.assign(project, { name, path: folder, description: clean(body.description ?? project.description, 500) });
           if (moved) for (const task of state.tasks.filter(t => t.projectId === project.id && ['approval', 'ready'].includes(t.status))) {
@@ -556,7 +606,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   return { server, close, tick };
 }
 
-export function commandArgs(kind, mode, route) {
+export function commandArgs(kind, mode, route, connections = []) {
   if (kind === 'codex') {
     const extra = route?.provider === 'omniroute' ? ['--model', route.model, '-c', 'model_provider="ultharness_omniroute"',
       '-c', 'model_providers.ultharness_omniroute.name="OmniRoute"', '-c', `model_providers.ultharness_omniroute.base_url=${JSON.stringify(normalizeBaseUrl(route.baseUrl))}`,
@@ -566,11 +616,12 @@ export function commandArgs(kind, mode, route) {
     if (route?.provider === 'omniroute' && route.model === 'ollama-local/llama3.2:3b') extra.push(
       '-c', 'model_reasoning_effort="none"', '-c', 'model_reasoning_summary="none"'
     );
-    return ['exec', '--json', '--color', 'never', '--sandbox', mode === 'edit' ? 'workspace-write' : 'read-only', '-c', 'approval_policy="never"', '--skip-git-repo-check', ...extra, '-'];
+    return ['exec', '--json', '--color', 'never', '--sandbox', mode === 'edit' ? 'workspace-write' : 'read-only', '-c', 'approval_policy="never"', '--skip-git-repo-check', ...extra, ...connectionArgs(kind, connections), '-'];
   }
   // Claude receives a fixed file-tool allowlist; shell execution is deliberately unavailable.
+  const mcpTools = connections.filter(c => c.kind === 'mcp').flatMap(c => c.tools.map(tool => `mcp__uh_${c.id.replace(/[^a-zA-Z0-9_]/g, '_')}__${tool}`));
   const tools = mode === 'edit' ? 'Read,Glob,Grep,Edit,Write' : 'Read,Glob,Grep';
-  return ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', mode === 'edit' ? 'acceptEdits' : 'default', '--tools', tools, '--allowedTools', tools, ...(route?.provider === 'omniroute' ? ['--model', route.model] : [])];
+  return ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', mode === 'edit' ? 'acceptEdits' : 'default', '--tools', tools, '--allowedTools', [tools, ...mcpTools].join(','), ...connectionArgs(kind, connections), ...(route?.provider === 'omniroute' ? ['--model', route.model] : [])];
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

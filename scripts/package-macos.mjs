@@ -17,6 +17,9 @@ if (!arch) throw new Error('Only Apple Silicon and Intel macOS runtimes are supp
 const minimum = '14.0';
 const node = process.execPath;
 const license = path.resolve(node, '../../LICENSE');
+const npmRoot = path.resolve(node, '../../lib/node_modules/npm');
+if (!existsSync(path.join(npmRoot, 'bin/npm-cli.js'))) throw new Error('npm is required beside the official Node installation to bundle project verification tools.');
+const npmVersion = JSON.parse(readFileSync(path.join(npmRoot, 'package.json'), 'utf8')).version;
 if (!existsSync(license)) throw new Error('Node runtime LICENSE not found next to its installation. Use an official Node distribution.');
 const work = mkdtempSync(path.join(os.tmpdir(), 'ultharness-macos-build-'));
 const app = path.join(output, 'Ultharness.app');
@@ -30,11 +33,14 @@ try {
   mkdirSync(output, { recursive: true });
   rmSync(app, { recursive: true, force: true });
   for (const dir of ['MacOS', 'Resources/app/public', 'Resources/app/desktop', 'Resources/runtime', 'Resources/licenses']) mkdirSync(path.join(contents, dir), { recursive: true });
-  for (const file of ['server.mjs', 'routing.mjs', 'package.json', 'README.md', 'public/index.html', 'public/app.js', 'public/style.css', 'desktop/server-entry.mjs']) {
+  for (const file of ['server.mjs', 'delivery.mjs', 'routing.mjs', 'package.json', 'README.md', 'public/index.html', 'public/app.js', 'public/style.css', 'desktop/server-entry.mjs']) {
     cpSync(path.join(root, file), path.join(resources, 'app', file));
   }
   cpSync(node, path.join(resources, 'runtime/node'));
   chmodSync(path.join(resources, 'runtime/node'), 0o755);
+  cpSync(npmRoot, path.join(resources, 'runtime/lib/node_modules/npm'), { recursive: true });
+  symlinkSync('lib/node_modules/npm/bin/npm-cli.js', path.join(resources, 'runtime/npm'));
+  symlinkSync('lib/node_modules/npm/bin/npx-cli.js', path.join(resources, 'runtime/npx'));
   cpSync(license, path.join(resources, 'licenses/Node-LICENSE.txt'));
   writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -64,6 +70,7 @@ try {
   run('/usr/bin/codesign', ['--force', '--sign', '-', app]);
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
   run(path.join(resources, 'runtime/node'), ['--version']);
+  run(path.join(resources, 'runtime/node'), [path.join(resources, 'runtime/lib/node_modules/npm/bin/npm-cli.js'), '--version']);
   const forbidden = [];
   function check(dir) {
     for (const name of readdirSync(dir)) {
@@ -85,6 +92,6 @@ try {
   run('/usr/bin/hdiutil', ['verify', dmg]);
   const sha256 = createHash('sha256').update(readFileSync(dmg)).digest('hex');
   writeFileSync(`${dmg}.sha256`, `${sha256}  ${name}\n`);
-  writeFileSync(path.join(output, 'build-info.json'), JSON.stringify({ version: pkg.version, architecture: arch, minimumMacOS: minimum, bundledNode: process.version, signing: 'ad-hoc (not notarized)', privateDataIncluded: false, sha256, builtAt: new Date().toISOString() }, null, 2) + '\n');
+  writeFileSync(path.join(output, 'build-info.json'), JSON.stringify({ version: pkg.version, architecture: arch, minimumMacOS: minimum, bundledNode: process.version, bundledNpm: npmVersion, signing: 'ad-hoc (not notarized)', privateDataIncluded: false, sha256, builtAt: new Date().toISOString() }, null, 2) + '\n');
   console.log(`Created ${dmg}`);
 } finally { rmSync(work, { recursive: true, force: true }); }

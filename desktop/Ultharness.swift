@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             window.makeKeyAndOrderFront(nil)
             window.setFrameAutosaveName("UltharnessMainWindow")
             NSApp.activate(ignoringOtherApps: true)
-            webView.loadHTMLString("<body style='background:#11130e;color:#d5eaa1;font:18px -apple-system;padding:60px'>Opening Ultharness…</body>", baseURL: nil)
+            webView.loadHTMLString("<body style='background:#111214;color:#d0ed91;font:18px -apple-system;padding:60px'>Opening Ultharness…</body>", baseURL: nil)
             if ProcessInfo.processInfo.environment["ULTHARNESS_DESKTOP_IGNORE_EXISTING"] == "1" { startEngine() }
             else { findExistingEngine() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
@@ -107,10 +107,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func findExistingEngine() {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:4310/api/state")!)
         request.timeoutInterval = 2
+        let requiredVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             let agents = json?["agents"] as? [[String: Any]]
-            let matches = (response as? HTTPURLResponse)?.statusCode == 200 && json?["server"] is [String: Any] && agents?.contains(where: { $0["id"] as? String == "agent_scout" }) == true
+            let serverInfo = json?["server"] as? [String: Any]
+            let matches = (response as? HTTPURLResponse)?.statusCode == 200 && serverInfo?["version"] as? String == requiredVersion && json?["deliveries"] is [[String: Any]] && agents?.contains(where: { $0["id"] as? String == "agent_scout" }) == true
             DispatchQueue.main.async {
                 guard let self else { return }
                 if matches { self.showDashboard(URL(string: "http://127.0.0.1:4310")!) }
@@ -197,8 +199,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard smoke, baseURL != nil, !smokeFinished else { return }
         smokeFinished = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            webView.evaluateJavaScript("JSON.stringify({title:document.title, heading:document.querySelector('main h1')?.innerText || '', agentCards:document.querySelectorAll('.agent-card').length})") { value, error in
-                guard error == nil, let text = value as? String, let bytes = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], result["agentCards"] as? Int == 4 else { self.fail("Native web view smoke test did not render the dashboard."); return }
+            webView.evaluateJavaScript("JSON.stringify({title:document.title, heading:document.querySelector('main h1')?.innerText || '', agentCards:document.querySelectorAll('.agent-card').length,deliveryNavigation:!!document.querySelector('nav a[href=\"#deliveries\"]'),connectionsNavigation:!!document.querySelector('nav a[href=\"#connections\"]')})") { value, error in
+                guard error == nil, let text = value as? String, let bytes = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], result["agentCards"] as? Int == 4, result["deliveryNavigation"] as? Bool == true, result["connectionsNavigation"] as? Bool == true else { self.fail("Native web view smoke test did not render the dashboard."); return }
                 try? bytes.write(to: self.dataFolder.appendingPathComponent("smoke-result.json"))
                 webView.takeSnapshot(with: nil) { image, _ in
                     if let tiff = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) { try? png.write(to: self.dataFolder.appendingPathComponent("smoke.png")) }
@@ -222,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc private func openGateway() { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:20128")!) }
     @objc private func connectFolder() {
         guard let base = baseURL else { return }
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Connect Project"
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false; panel.canCreateDirectories = true; panel.prompt = "Connect Project"
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let folder = panel.url else { return }
             var request = URLRequest(url: base.appendingPathComponent("api/projects")); request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")

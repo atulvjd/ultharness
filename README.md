@@ -1,12 +1,18 @@
 # Ultharness
 
-A local workspace for coding agents and recurring operations, inspired by Herdr's visibility and Paperclip's task structure.
+A local workspace for client delivery, coding agents, and recurring operations. Turn a detailed brief into implementation, recorded checks, independent review, and bounded repair cycles.
+
+## Interface update · 0.3.1
+
+The dashboard uses a charcoal palette with lime accents, a delivery-focused overview, readable status cards, grouped navigation and responsive layouts. Client deliveries have stage indicators and filters for all work, in-progress work, review, and accepted deliveries. The client-brief form is split into project, acceptance, team, and check sections.
+
+Click **Search workspace** or press **⌘K / Ctrl+K** to find a page, task number, client, or delivery. Use the arrow keys and Enter to open a result; Escape closes search and dialogs. On narrower screens, the navigation button opens a labelled menu with keyboard focus contained inside it. Existing tasks, approvals and delivery evidence remain available through their usual controls.
 
 ## Mac app and disk image
 
-Open the generated `.dmg`, drag **Ultharness** into **Applications**, and launch it. The native Mac window and Node runtime are bundled. Codex, Claude, OmniRoute, Ollama, their accounts and model weights remain separate installations.
+Open the generated `.dmg`, drag **Ultharness** into **Applications**, and launch it. The native Mac window, Node runtime, npm and npx are bundled. Codex, Claude, OmniRoute, Ollama, their accounts and model weights remain separate installations.
 
-If the browser version is running on port 4310, the app connects to that workspace and leaves its server running when you quit. Otherwise it starts a bundled loopback server on an available port, with its own SQLite state under `~/Library/Application Support/Ultharness/workspace`. The standalone app's initial project is Documents. Choose **File → Connect Project Folder** to add a project using the native folder picker. The app does not move the browser version's database.
+If the same browser version is running on port 4310, the app connects to that workspace and leaves its server running when you quit. Otherwise, including when an older server occupies that port, it starts a bundled loopback server on an available port, with its own SQLite state under `~/Library/Application Support/Ultharness/workspace`. The standalone app's initial project is Documents. Choose **File → Connect Project Folder** to add a project using the native folder picker. The app does not move the browser version's database.
 
 **Model Services** can start installed OmniRoute or Ollama. Processes started by the Mac app stop when it quits. Previously running services remain running. Save standalone app gateway credentials in a private `~/Library/Application Support/Ultharness/settings.env` file to retain them across launches, or use the existing session key form. **File → Open Desktop Log** shows startup issues.
 
@@ -16,7 +22,7 @@ Build locally on macOS with Xcode Command Line Tools and an official Node.js 24+
 npm run package:mac
 ```
 
-This creates `dist/Ultharness.app`, a versioned `.dmg`, its SHA-256 file, and build metadata. The build uses the host Node architecture. The current Apple Silicon package requires macOS 14+. Only an explicit source-file allowlist is bundled. Keys, `.env`, SQLite databases, logs and model weights are excluded. The official Node runtime's license is included.
+This creates `dist/Ultharness.app`, a versioned `.dmg`, its SHA-256 file, and build metadata. The build uses the host Node architecture. The current Apple Silicon package requires macOS 14+. Only an explicit source-file allowlist is bundled. Keys, `.env`, SQLite databases, logs and model weights are excluded. The official Node runtime's license and npm's included licenses are bundled. Dependencies needed by client projects remain project-specific.
 
 The local build is ad-hoc signed and verified, but not Apple-notarized. Public distribution with Developer ID and notarization is a separate release step described in [Apple's distribution guidance](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution). The installer does not change macOS security settings.
 
@@ -64,6 +70,34 @@ The default model is saved only as a convenience for new tasks. Selecting it doe
 
 References: [OmniRoute Codex configuration](https://omniroute.hagicode.com/en-US/guides/codex-cli-configuration/), [OmniRoute Claude configuration](https://omniroute.hagicode.com/en-US/guides/claude-code-configuration/), [Codex custom model providers](https://learn.chatgpt.com/docs/config-file/config-advanced), and [Claude gateway support](https://code.claude.com/docs/en/llm-gateway).
 
+## Client website delivery
+
+1. Connect a dedicated client folder under **Projects**. The folder must already exist; use an empty folder for a new website.
+2. Add **Connections** for the client’s repository, Figma design, local documents, CMS, database, API, and hosting references. A reference link supplies context; it does not authenticate or fetch service data automatically.
+3. Open **Client deliveries → New client brief**, or use **Try a website brief**. Include the purpose, audience, pages, user flows, content, visual direction, technology, responsive behavior, constraints, and expected handoff.
+4. Add one measurable acceptance criterion per line. Choose a builder and reviewer; the reviewer always uses a fresh read-only file session, even when both roles use the same CLI/model.
+5. Add required files and/or finite npm verification scripts. File lines can use `path :: required text` for a literal content assertion. Script entries are names such as `build`, `test`, or `test:e2e` from the client project’s `package.json`. Include browser/accessibility checks in those scripts when appropriate. Scripts execute the project’s current code with the app’s user permissions, inherit its environment except gateway client keys, and each has a two-minute timeout. Output includes the executed script, manifest hash and exit status. These are not an OS sandbox.
+6. Select connections and a maximum of 0–5 automatic repair attempts. Saving only creates a draft. **Review & start** shows the complete run scope. **Approve & build** authorizes that bounded build/check/review cycle, including automatic repairs, with at most `2 × (repairs + 1)` AI runs on that approval. Normal tasks, routines and sequential workflows keep their existing individual approvals.
+7. Follow the current task’s logs. Every build and review requires a structured tool event. Real file checks and npm exit codes gate review. Failed checks go back to the builder. The reviewer must return pass/fail plus evidence for every criterion; missing, malformed, contradictory or incomplete verdicts cannot pass. A rejected review sends its findings back for repair.
+8. Passing work becomes **Ready for your review**. Inspect the website and evidence, then **Accept delivery** or **Request changes**. Client feedback invalidates the previous run approval and requires a new one. Download the combined **Evidence report** at any time. Deployment is a separate action.
+
+**Stop cycle** cancels the current step and prevents the next one. Locks remain held until its process exits. A restart blocks interrupted deliveries for review rather than silently resuming them. An active delivery reserves its project against unrelated coding/check jobs until acceptance or requested changes. Project folders cannot change during a cycle. The brief, connection snapshots, project path, route/model and gateway URL are fixed for an approved cycle; later connection edits do not silently change its scope. **Revise brief** creates a new draft while preserving the original history.
+
+A review is an AI assessment, not a correctness guarantee. Tool activity alone does not establish truth; a file-existence check alone does not establish a working website. Unverifiable visual/behavior requirements must be reported as failed. Use meaningful independent tests and inspect the result yourself before acceptance. Provider failures, missing tools, malformed verdicts and exhausted repair limits stop for attention. There is no automatic deployment, external write approval, model-spend budget, or automatic service-account sign-in in this cycle.
+
+## Extending connections
+
+Connections support two adapters:
+
+- **Reference:** a URL and/or project-relative file path plus context. Categories cover GitHub, Figma, files, CMS, databases, deployment, APIs, MCP and other tools. Service authentication is not implied. URLs can include ordinary design/frame parameters, but embedded credentials and recognized authentication token parameters are rejected. Private configuration directories and parent-directory paths are rejected for local references.
+- **MCP:** an installed stdio command with a JSON argument array, or a Streamable HTTP endpoint, and an exact allowlist of read tool names. Connections are configured per builder process. Codex receives `mcp_servers` overrides and `enabled_tools`; Claude receives `--mcp-config`, `--strict-mcp-config` and explicit `--allowedTools`. Neither adapter rewrites global CLI settings. Review sessions receive no delivery-added MCP servers. Existing CLI/account policies still apply.
+
+MCP servers, packages and accounts must be installed/configured separately. Saving a connection does not start it or independently verify its tools. Choose only read tools: the server controls their actual behavior, and the allowlist is not proof that a tool has no side effects. Credentials belong in locally configured services/CLI environment or an authenticated local proxy, never connection URLs, command arguments, notes or the client brief. HTTP connections do not provide an OAuth sign-in flow or custom authentication headers. Reference-only CMS/database/deployment cards are not native service clients.
+
+For additional verification integrations, expose a finite npm script in the client project. It can run your existing browser tests, accessibility tests, schema checks, or other tools; its output becomes delivery evidence. Arbitrary deployment/start/dev scripts are not suitable verification steps. The app blocks those common script names, but cannot inspect all effects of arbitrary project code.
+
+Implementation follows [Codex MCP configuration](https://developers.openai.com/codex/mcp) and [Claude CLI configuration](https://code.claude.com/docs/en/cli-reference). MCP argument generation is tested with local fixtures; external service authentication and tool execution require a configured server and a separately approved real delivery run.
+
 ## First workflow
 
 1. Click **Inspect workspace**. Scout inventories the real project folder, declared package scripts, and Git status, then saves a report.
@@ -105,7 +139,7 @@ Scout and Pulse are deterministic tools, **not language models**. Their descript
 
 The app detects executable availability from the server's `PATH`. It does not install CLIs or log in for you. CLI-default tasks use your CLI's configured account. OmniRoute tasks use the gateway's providers. Sign-in, account limits, and model availability are verified by the provider when a run starts. The dashboard's routing form accepts a gateway key; upstream provider credentials are managed in OmniRoute.
 
-Every CLI run, including retries and scheduled runs, requires approval in this app. This authorizes a **whole task**, not each individual tool call. Codex runs with its selected sandbox and `approval_policy="never"`, so requests that need elevated permissions cannot obtain them interactively. Claude receives an explicit file-tool allowlist; shell execution is unavailable through that integration. Provider/project configuration can still affect CLI behavior.
+Ordinary CLI tasks, retries and scheduled runs require individual approval in this app. Client deliveries have an explicit approval covering the bounded build/check/review/repair cycle shown in its scope screen. Approval covers whole tasks or the scoped cycle, not each individual tool call. Codex runs with its selected sandbox and `approval_policy="never"`, so requests that need elevated permissions cannot obtain them interactively. Claude receives an explicit file-tool allowlist and, for an approved delivery builder, its selected MCP read tools; shell execution is unavailable through that integration. Provider/project configuration can still affect CLI behavior.
 
 After cancellation, the task shows **Stopping previous run…** until its process exits. Retrying is disabled during that interval so output from the old process cannot overwrite a fresh approval. A CLI that exits without a non-empty assistant report is marked failed, and later workflow steps stay on hold. Startup messages and diagnostic logs do not count as a report. A report still requires your review for correctness.
 
@@ -118,7 +152,7 @@ AI runs send instructions and any context the CLI reads to the configured provid
 - The scheduler polls every 15 seconds while the server is running. This is not an OS background service.
 - An overdue routine runs once after downtime; missed intervals are not replayed.
 - An unfinished routine task prevents duplicate runs. Disabled agents do not accept new tasks.
-- SQLite stores projects, agents, tasks, workflows, approvals, logs, notes, routines, artifacts, and activity.
+- SQLite stores projects, client briefs and delivery attempts, connection definitions and snapshots, agents, tasks, workflows, approvals, logs, notes, routines, artifacts, and activity.
 - Stopping the server terminates its CLI processes. Interrupted jobs are marked failed and can be submitted again. The app does **not** resurrect running processes or resume CLI conversations after a restart.
 - Reruns append logs and create another report, preserving earlier artifacts.
 
@@ -138,7 +172,7 @@ Local Node server (127.0.0.1 only)
            └── Claude Code CLI process
 ```
 
-`server.mjs` contains the API, queue, scheduler, reports, and adapters. `public/app.js` renders the dashboard and handles forms and live updates. `public/style.css` contains the responsive visual system.
+`server.mjs` contains the API, queue, scheduler, reports, and adapters. `delivery.mjs` contains the client delivery state machine, verdict gate, connection configuration, and recorded check runner. `public/app.js` renders the dashboard and handles forms and live updates. `public/style.css` contains the responsive visual system.
 
 The server binds only to loopback, validates Host and Origin, requires JSON mutations, serves an explicit asset allowlist, and escapes untrusted content in the UI. It has no multi-user authentication and is intended for a single user's trusted machine. Keep its database private: logs and reports can contain project information.
 
@@ -149,10 +183,10 @@ npm run check
 npm test
 ```
 
-Tests exercise real local reports and downloads, dependencies, routines and edits, persistence, priority ordering, workflow handoffs and separate approvals, pause/resume, failed-step recovery, folder reconnection, origin and input validation, cancellation, stream parsing, CLI permission arguments, gateway discovery/authentication, routing isolation, endpoint pinning, gateway startup isolation, and credential redaction. Provider integration tests use local fixture executables and make **no model calls**. Live provider authentication and generation require a user-approved run.
+Tests exercise real local reports and downloads, dependencies, routines and edits, persistence, priority ordering, workflow handoffs and separate approvals, pause/resume, failed-step recovery, folder reconnection, origin and input validation, cancellation, stream parsing, CLI permission arguments, gateway discovery/authentication, routing isolation, endpoint pinning, gateway startup isolation, and credential redaction. Delivery tests additionally exercise real npm checks, rejected-review repair loops, final owner acceptance, malformed verdicts, repair exhaustion, recorded-tool requirements, connector validation/snapshots, route pinning, stop controls, restart handling and symlink boundaries. Provider integration tests use local fixture executables and make **no model calls**. Live provider authentication and generation require a user-approved run.
 
 CLI integration references: [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive) and [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference). Installed CLI help was checked during implementation.
 
 ## Scope
 
-This version supports human-directed task assignment, follow-ups, sequential workflows, and recurring local work. It does not yet provide an autonomous manager that decomposes goals, agent-to-agent API access, interactive terminal panes, Git worktree management, SSH execution, cloud service integrations, network-device access, or a credential vault.
+This version supports bounded client-delivery automation, human-directed tasks, follow-ups, sequential workflows, recurring local work, references and per-run MCP read-tool connections. It does not provide unlimited autonomous project management, agent-to-agent API access, interactive terminal panes, Git worktree management, SSH execution, native service-account management, automatic cloud deployment, network-device access, or a credential vault.

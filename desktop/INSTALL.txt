@@ -5,16 +5,17 @@ Drag Ultharness.app onto Applications, then open it from Applications.
 This build is for Apple Silicon Macs running macOS 14 or later.
 
 WHAT IS INCLUDED
-The native window, dashboard, local server, and Node.js runtime are bundled.
-You do not need Terminal or a separate Node installation for the dashboard.
+The native window, dashboard, local server, Node.js, npm and npx are bundled.
+You do not need a separate Node installation for the dashboard or npm checks.
+Client project dependencies and external tools must still be available.
 Your API keys, task database, source folders, and model weights are not included.
 
 YOUR WORKSPACE
-If the browser version is already running at http://127.0.0.1:4310, the app
+If the same browser version is running at http://127.0.0.1:4310, the app
 connects to it, preserving that workspace. Quitting the Mac app leaves that
 separately started server running.
 
-Otherwise the Mac app starts its own local server and stores data in:
+Otherwise (including an older browser server) the Mac app starts its own local server and stores data in:
   ~/Library/Application Support/Ultharness/workspace
 
 Use File > Connect Project Folder to choose a project. The standalone app's
@@ -41,3 +42,12 @@ settings are changed by this installer.
 TROUBLESHOOTING
 File > Open Desktop Log shows startup errors.
 File > Open App Data Folder opens the standalone app's settings and data.
+
+CLIENT DELIVERY
+Connect a dedicated client folder, then open Client deliveries > New client brief.
+Add the brief, acceptance criteria, required files and verification script names.
+Choose agents, connections, a model route and a repair limit. Save the draft,
+review the scope, and approve the bounded build/check/review/repair cycle.
+Passing work waits for your acceptance. Publication is a separate action.
+Connections can be reference links/files or separately configured MCP read tools.
+A saved reference is not an authenticated service connection.
