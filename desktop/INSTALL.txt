@@ -51,3 +51,11 @@ review the scope, and approve the bounded build/check/review/repair cycle.
 Passing work waits for your acceptance. Publication is a separate action.
 Connections can be reference links/files or separately configured MCP read tools.
 A saved reference is not an authenticated service connection.
+
+ONE AIM, LIVE WORK
+Click Start with an aim, enter the goal and references, choose a project folder,
+and Start & watch live. The app plans standards, builds, verifies, reviews and
+repairs within your selected limit. Live workspace shows actual output.
+Live site preview reloads static/built HTML as files change; it does not start
+framework development servers. You can stop the cycle at any time. Passing
+work waits for your final acceptance. Account and tool availability still matter.

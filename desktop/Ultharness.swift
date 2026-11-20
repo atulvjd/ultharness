@@ -167,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        if navigationAction.targetFrame?.isMainFrame == false, url.scheme == "http", url.host == "127.0.0.1" { decisionHandler(.allow); return }
         if url.scheme == "about" { decisionHandler(.allow); return }
         if let base = baseURL, url.scheme == base.scheme, url.host == base.host, url.port == base.port { decisionHandler(.allow); return }
         if navigationAction.navigationType == .linkActivated, ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
@@ -199,8 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         guard smoke, baseURL != nil, !smokeFinished else { return }
         smokeFinished = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            webView.evaluateJavaScript("JSON.stringify({title:document.title, heading:document.querySelector('main h1')?.innerText || '', agentCards:document.querySelectorAll('.agent-card').length,deliveryNavigation:!!document.querySelector('nav a[href=\"#deliveries\"]'),connectionsNavigation:!!document.querySelector('nav a[href=\"#connections\"]')})") { value, error in
-                guard error == nil, let text = value as? String, let bytes = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], result["agentCards"] as? Int == 4, result["deliveryNavigation"] as? Bool == true, result["connectionsNavigation"] as? Bool == true else { self.fail("Native web view smoke test did not render the dashboard."); return }
+            webView.evaluateJavaScript("JSON.stringify({title:document.title, heading:document.querySelector('main h1')?.innerText || '', agentCards:document.querySelectorAll('.agent-card').length,deliveryNavigation:!!document.querySelector('nav a[href=\"#deliveries\"]'),connectionsNavigation:!!document.querySelector('nav a[href=\"#connections\"]'),missionNavigation:!!document.querySelector('nav a[href=\"#live\"]')})") { value, error in
+                guard error == nil, let text = value as? String, let bytes = text.data(using: .utf8), let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any], result["agentCards"] as? Int == 4, result["deliveryNavigation"] as? Bool == true, result["connectionsNavigation"] as? Bool == true, result["missionNavigation"] as? Bool == true else { self.fail("Native web view smoke test did not render the dashboard."); return }
                 try? bytes.write(to: self.dataFolder.appendingPathComponent("smoke-result.json"))
                 webView.takeSnapshot(with: nil) { image, _ in
                     if let tiff = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) { try? png.write(to: self.dataFolder.appendingPathComponent("smoke.png")) }

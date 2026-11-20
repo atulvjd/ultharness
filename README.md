@@ -2,6 +2,26 @@
 
 A local workspace for client delivery, coding agents, and recurring operations. Turn a detailed brief into implementation, recorded checks, independent review, and bounded repair cycles.
 
+## One aim → live delivery · 0.4.0
+
+Click **Start with an aim**, describe the result, add reference URLs or project-relative documents, choose the project folder, and press **Start & watch live**. Optional run settings let you select the model route, reusable connections and 1–5 repairs (default 3). That start action authorizes the displayed cycle; there is no second approval for each step.
+
+Planning begins without assumed file paths or scripts. The planner inspects the actual workspace and derives an implementation plan, measurable criteria and finite checks from the original aim. The original aim and references remain in every build/review prompt. Fixed standards require honest reference handling, actual browser evidence for website interactions and responsive behavior, and no weakened tests or invented integrations. Planner output is validated before building; arbitrary script names, invalid paths and malformed plans block the run. Verification scripts use build/test/check/lint/typecheck/verify names and may need to be added by the builder. These scripts execute project code as your Mac user; they are not an OS sandbox.
+
+Then the harness builds, runs recorded checks, reviews in a fresh session, and repairs rejected work within the selected limit. It defaults to an available Codex CLI, or Claude if Codex is unavailable, and uses that same CLI in a separate review session unless another reviewer is explicitly selected through the API. Availability does not establish account authentication or model/tool capability. A provider error or missing tool stops for attention. Missing browser evidence must be rejected, not reported as visually verified. Checks/review passing makes the work ready for your acceptance; it does not automatically publish it or guarantee correctness. Model usage may be billed, with no monetary budget enforcement.
+
+**Live workspace** streams actual logs, tool output, check results, the derived standards and review evidence. **Stop cycle** cancels the active step. **Live site preview** displays static `index.html` output, checking `dist`, `build`, `out`, then the project root. It reloads when relevant files change. It does not launch framework development servers or proxy application backends. The preview runs on a separate loopback origin in a sandboxed iframe, blocks forms/external connections, omits hidden paths and private file types, and rejects symlinks outside the project. Static output may therefore preview while API-dependent features require the project's own runtime.
+
+With the browser backend already running (`npm start`), the same flow takes one command:
+
+```sh
+npm run aim -- "Build my client's complete architecture website; match the references and verify responsive behavior" --project "/path/to/client-project" --ref "docs/brief.md" --ref "https://example.com/design" --repairs 3
+```
+
+The command connects an existing project folder if necessary, starts the mission, and streams its logs until it passes review or needs attention. Ctrl+C stops that cycle. Use `--server http://127.0.0.1:PORT` for another local backend (including the desktop app's URL), and `--route omniroute --model EXACT_ID` for a routed model. The default model route is your installed CLI account; no global CLI settings are rewritten. A mission allows at most one planner plus `2 × (repair limit + 1)` AI runs on its initial approval.
+
+The `POST /api/missions` endpoint accepts `aim`, `projectId`, optional `references` and `connectionIds`, and optional `builderId`, `reviewerId`, `maxRepairs`, `route`, `model`. It starts the cycle immediately. Existing advanced client-brief forms and ordinary tasks keep their earlier behavior. Active planning reserves the project and is blocked for re-approval after restart, like other running stages.
+
 ## Interface update · 0.3.1
 
 The dashboard uses a charcoal palette with lime accents, a delivery-focused overview, readable status cards, grouped navigation and responsive layouts. Client deliveries have stage indicators and filters for all work, in-progress work, review, and accepted deliveries. The client-brief form is split into project, acceptance, team, and check sections.

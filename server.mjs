@@ -95,7 +95,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       tasks: state.tasks.map(task => ({ ...task, stopping: active.has(task.id) && terminal(task.status), waitReason: waitReason(task) })), routing: routingSnapshot(), agents: state.agents.map(agent => ({ ...agent,
       available: native(agent.kind) || !!executable(agent.kind),
       activeTaskId: [...active.keys()].find(taskId => getTask(taskId).agentId === agent.id) || null
-    })), server: { root: path.resolve(root), startedAt, version: '0.3.1', host: os.hostname(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
+    })), server: { root: path.resolve(root), startedAt, version: '0.4.0', host: os.hostname(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } };
   }
   function log(task, text, channel = 'info') {
     if (terminal(task.status)) return;
