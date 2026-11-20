@@ -1,0 +1,9 @@
+{
+  "name": "ultharness-landing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node serve.mjs",
+    "check": "node --check dist/site.js && node --check serve.mjs"
+  }
+}

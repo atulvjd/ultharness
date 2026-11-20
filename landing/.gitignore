@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+preview.png
+mobile-preview.png
+verification.json
+local-verification.json
