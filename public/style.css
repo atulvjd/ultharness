@@ -681,3 +681,17 @@ dialog::backdrop { background: #080b08bd; backdrop-filter: blur(8px); }
 }
 @media(prefers-reduced-motion:reduce) { *, *:before, *:after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* Aim-driven missions */
+.mission-options { border-top:1px solid var(--line); padding-top:16px; margin-bottom:22px; }
+.mission-options>summary { cursor:pointer; color:var(--accent); font-size:12px; margin-bottom:17px; }
+.mission-consent { margin:15px 0 0; }
+.mission-header { display:flex; align-items:center; flex-wrap:wrap; gap:18px; padding:24px; margin-bottom:24px; }
+.mission-header>div:first-child { flex:1; min-width:200px; }.mission-header h2 { font-size:22px; line-height:1.5; overflow-wrap:anywhere; }.mission-header p { color:var(--muted); font-size:11px; margin-top:9px; }
+.mission-header-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; width:100%; padding-top:16px; border-top:1px solid var(--line); }
+.mission-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:22px; margin-top:22px; }.mission-grid>* { min-width:0; }
+.mission-log { border:0; border-top:1px solid var(--line); border-radius:0; height:600px; max-height:65vh; min-height:300px; }.mission-log .log-line.phase { border-top:1px solid #4d6536; margin-top:14px; padding-top:14px; }.mission-log .phase pre { color:var(--accent); font-weight:600; }
+.mission-task-link { padding:16px 20px; }.mission-plan-title { font-size:13px; font-weight:500; margin:18px 0 10px; }.mission-evidence .criteria-list strong { font-size:11px; }.mission-evidence .delivery-body { padding:0 22px 22px; }
+.preview-note { padding:15px 20px; font-size:11px; color:var(--muted); line-height:1.8; }.mission-preview-frame { width:100%; height:65vh; border:0; background:white; display:block; }
+@media(max-width:1100px){.mission-grid{grid-template-columns:1fr}.mission-log{height:440px}.mission-header{padding:20px}}
+@media(max-width:700px){.mission-header h2{font-size:18px}.mission-header-actions{gap:10px}.mission-header-actions .button{font-size:10px}.mission-log{padding:12px;height:410px}.mission-log .log-line{gap:8px}.mission-log .log-line pre{font-size:10px}}
