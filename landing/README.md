@@ -25,3 +25,9 @@ Open http://127.0.0.1:4380. Set PORT to use another local port.
 Run `npm run check` for syntax checks. The landing page is independent of the desktop dashboard and doesn't use its private data, API keys, or local SQLite state. The walkthrough is explicitly illustrative and makes no model calls. Product screenshots use sample projects.
 
 New Sites are private by default. Website publication does not change the desktop app's signing state: the current installer is ad-hoc signed, not Apple-notarized, and requires macOS 14 or later.
+
+## Git and installer downloads
+
+The landing page keeps its deployable HTML, CSS, JavaScript, and product assets in `dist/`; these are source files and are tracked. Its local ignore rules override the app repository’s general `dist/` exclusion.
+
+Generated `.dmg` installers remain excluded from Git. Before deploying from a fresh checkout, supply the installer version referenced by the page under `dist/downloads/`, or host it as a release asset and update the download links. The checksum file is tracked. Local folder uploads can include the existing installer.

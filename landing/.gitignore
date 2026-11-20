@@ -4,3 +4,7 @@ preview.png
 mobile-preview.png
 verification.json
 local-verification.json
+
+# This standalone static site keeps its source in dist.
+!dist/
+/dist/downloads/*.dmg
