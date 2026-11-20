@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createPreview } from './preview.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync, existsSync, statSync, readdirSync, statfsSync } from 'node:fs';
 import path from 'node:path';
@@ -45,6 +46,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   const redact = value => { let text = String(value); for (const key of redactions) if (key) text = text.split(key).join('[gateway key redacted]'); return text; };
   const routingSnapshot = () => ({ ...state.routing, keyConfigured: !!routingKeys.get(state.routing.baseUrl) });
   const active = new Map();
+  const previews = new Map();
   const clients = new Set();
   let closing = false;
   const persist = () => db.prepare('INSERT INTO state(id,body) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(JSON.stringify(state));
@@ -169,7 +171,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     if (task.dependsOnId && getTask(task.dependsOnId).status !== 'done') return `Waiting for UH-${String(getTask(task.dependsOnId).number).padStart(3, '0')} to finish successfully`;
     if (!getAgent(task.agentId).enabled) return 'Agent is paused';
     if (task.workflowId && !state.workflows.find(w => w.id === task.workflowId)?.enabled) return 'Workflow is paused';
-    if (state.deliveries.some(d => ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId) && projectExclusive(getAgent(task.agentId).kind)) return 'A client delivery has reserved this project';
+    if (state.deliveries.some(d => ['planning', 'building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId) && projectExclusive(getAgent(task.agentId).kind)) return 'A client delivery has reserved this project';
     if (task.status === 'queued') return 'Submit this task to start';
     if ([...active.keys()].some(taskId => getTask(taskId).agentId === task.agentId)) return 'Agent is finishing another task';
     if (projectExclusive(getAgent(task.agentId).kind) && [...active.keys()].some(taskId => { const other = getTask(taskId); return other.projectId === task.projectId && projectExclusive(getAgent(other.agentId).kind); })) return 'Another AI task is using this project';
@@ -349,7 +351,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       if (task.status !== 'ready') continue;
       const agent = getAgent(task.agentId);
       if (task.workflowId && !state.workflows.find(w => w.id === task.workflowId)?.enabled) continue;
-      if (projectExclusive(agent.kind) && state.deliveries.some(d => ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId)) continue;
+      if (projectExclusive(agent.kind) && state.deliveries.some(d => ['planning', 'building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status) && d.projectId === task.projectId && d.id !== task.deliveryId)) continue;
       if (!agent.enabled || [...active.keys()].some(taskId => getTask(taskId).agentId === agent.id)) continue;
       if (task.dependsOnId && getTask(task.dependsOnId).status !== 'done') continue;
       // Coding agents that may write share a project lock to prevent conflicting edits.
@@ -432,7 +434,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     const json = (value, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
     try {
       if (!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '')) throw fail('Local access only', 403);
@@ -443,6 +445,12 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       if (req.method === 'GET' && route === '/api/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         res.write('data: {}\n\n'); clients.add(res); req.on('close', () => clients.delete(res)); return;
+      }
+      if (req.method === 'GET' && /^\/api\/deliveries\/[^/]+\/preview$/.test(route)) {
+        const delivery = deliveries.find(route.split('/')[3]);
+        const folder = getProject(delivery.projectId).path;
+        if (!previews.has(folder)) { const pending = createPreview(folder).catch(error => { previews.delete(folder); throw error; }); previews.set(folder, pending); }
+        const preview = await previews.get(folder); return json({ url: preview.url });
       }
       if (req.method === 'GET' && /^\/api\/deliveries\/[^/]+\/report$/.test(route)) {
         const delivery = deliveries.find(route.split('/')[3]);
@@ -489,6 +497,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           else connection.enabled = !connection.enabled;
           event(`Connection ${parts[3] === 'delete' ? 'removed' : connection.enabled ? 'enabled' : 'disabled'}: ${connection.name}`); change(); return json({ ok: true });
         }
+        if (route === '/api/missions') { const delivery = deliveries.mission(body); pump(); return json(delivery, 201); }
         if (route === '/api/deliveries') return json(deliveries.create(body), 201);
         if (parts[1] === 'deliveries' && parts[2]) {
           const delivery = deliveries.find(parts[2]);
@@ -558,7 +567,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           const name = clean(body.name ?? project.name, 80); if (!name) throw fail('Give this project a name');
           const folder = resolveDirectory(body.path ?? project.path);
           const moved = folder !== project.path;
-          if (moved && state.deliveries.some(d => d.projectId === project.id && ['building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status))) throw fail('Finish or stop this delivery, or request changes, before changing its folder', 409);
+          if (moved && state.deliveries.some(d => d.projectId === project.id && ['planning', 'building', 'checking', 'reviewing', 'awaiting_acceptance'].includes(d.status))) throw fail('Finish or stop this delivery, or request changes, before changing its folder', 409);
           if (moved && [...active.keys()].some(taskId => getTask(taskId).projectId === project.id)) throw fail('Wait for this project’s active tasks to finish before changing its folder', 409);
           Object.assign(project, { name, path: folder, description: clean(body.description ?? project.description, 500) });
           if (moved) for (const task of state.tasks.filter(t => t.projectId === project.id && ['approval', 'ready'].includes(t.status))) {
@@ -600,6 +609,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   async function close() {
     closing = true; clearInterval(timer); clearInterval(heartbeat);
     for (const [taskId, value] of active) { stopProcess(value.child); const task = getTask(taskId); if (!terminal(task.status)) { task.status = 'failed'; task.error = 'Server stopped during this run. Review logs and run again.'; } }
+    await Promise.allSettled([...previews.values()].map(async preview => (await preview).close()));
     persist(); for (const client of clients) client.end(); clients.clear();
     await new Promise(resolve => server.close(resolve)); db.close();
   }
