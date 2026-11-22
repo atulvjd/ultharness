@@ -129,8 +129,11 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
       return clone(c);
     });
     if (new Set(connections.filter(c => c.integration === 'openclaw').map(c => c.args[1])).size > 1) throw bad('Select a single OpenClaw gateway per mission');
-    const maxRepairs = Number(body.maxRepairs ?? 2);
-    if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 5) throw bad('Choose 0–5 repair attempts');
+    const persistent = body.runPolicy === 'persistent';
+    const maxRepairs = Number(body.maxRepairs ?? (persistent ? 100 : 2));
+    if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > (persistent ? 100 : 5)) throw bad(persistent ? 'Choose 0–100 repair attempts' : 'Choose 0–5 repair attempts');
+    const maxMinutes = Number(body.maxMinutes ?? (persistent ? 720 : 120));
+    if (!Number.isInteger(maxMinutes) || maxMinutes < 1 || maxMinutes > 1440) throw bad('Choose a run time budget of 1–1440 minutes');
     // Validate the reviewer route too, before persisting anything.
     prepareTask({ title, projectId: body.projectId, agentId: body.reviewerId, route: body.route || 'direct', model: body.model });
     // Validate route and model before persisting a draft, without submitting a job.
@@ -138,6 +141,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     const delivery = { id: uid('delivery'), title, client: text(body.client, 120), brief,
       projectId: body.projectId, builderId: body.builderId, reviewerId: body.reviewerId, routing: route,
       criteria: body.criteria.map((criterion, i) => ({ id: `AC-${i + 1}`, text: criterion.trim() })), checks: body.checks.map(checkSettings), connections,
+      runPolicy: persistent ? 'persistent' : 'bounded', maxMinutes, recoveryAttempts: 0, maxRecoveries: persistent ? 3 : 0, checkpoints: [],
       maxRepairs, repairs: 0, status: 'draft', phase: null, createdAt: now(), updatedAt: now(), taskIds: [], attempts: [], currentTaskId: null, error: null, feedback: '', approval: null };
     state.deliveries.unshift(delivery); event(`Client brief saved: ${title}`); change(); return delivery;
   }
@@ -153,7 +157,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     if (!Array.isArray(body.references || []) || (body.references || []).length > 20 || (body.references || []).some(v => typeof v !== 'string')) throw bad('Add at most 20 reference links or project-relative files');
     const references = (body.references || []).map((value, i) => ({ ...connectionSettings({ name: `Reference ${i + 1}`, kind: 'reference', ...(/^https?:\/\//i.test(value) ? { url: value } : { file: value }) }), id: uid('reference'), enabled: true }));
     const delivery = create({ ...body, title: aim.split('\n')[0].slice(0, 140), brief: aim, builderId: builder.id, reviewerId: reviewer.id,
-      maxRepairs: body.maxRepairs ?? 3, criteria: ['Deliver the complete aim and respect the supplied references; report inaccessible references and unmet requirements honestly.'],
+      maxRepairs: body.maxRepairs ?? (body.runPolicy === 'persistent' ? 100 : 3), criteria: ['Deliver the complete aim and respect the supplied references; report inaccessible references and unmet requirements honestly.'],
       checks: [{ kind: 'file', file: 'index.html' }] });
     delivery.mission = true; delivery.checks = []; delivery.connections.push(...references); delivery.planned = false;
     try { return approve(delivery); } catch (err) { block(delivery, err.message); throw err; }
@@ -183,7 +187,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     const agentId = checking ? 'agent_verify' : reviewing ? delivery.reviewerId : delivery.builderId;
     const reviewFormat = `Independently inspect the actual project files and check results. Do not trust the builder's claims. Use tools. Assess every acceptance criterion including visual/responsive requirements; if you cannot verify one, fail it and explain what evidence is missing. Report blockers and weakened tests. Return a final fenced JSON object of this exact shape:\n${JSON.stringify({ verdict: 'pass OR reject', summary: 'Findings and required fixes', criteria: delivery.criteria.map(c => ({ id: c.id, status: 'pass OR fail', evidence: 'Concrete file:line, test, or browser observation; never an invented result' })) }, null, 2)}`;
     const planInstructions = `Inspect the actual project first and read accessible supplied references. Infer a complete implementation plan and measurable standards from the ORIGINAL AIM. Do not modify project files. Resolve routine design choices from context. Identify missing access as a blocker. Select meaningful finite verification checks appropriate to this project: file assertions and/or npm scripts named build, test, check, lint, typecheck or verify (suffixes allowed). Scripts can be existing or ones the builder must add; never choose deployment or long-running dev commands. For website work include browser interaction, accessibility and responsive evidence in the criteria. Return a final fenced JSON object: {"summary":"Implementation plan and assumptions", "criteria":["Measurable requirement"], "checks":[{"kind":"file","file":"actual/entry.html"},{"kind":"npm","script":"test"}]}. Choose real paths and scripts for this project, not illustrative paths. Keep the original aim intact.`;
-    const description = `${scope(delivery)}\n${planning ? planInstructions : reviewing ? reviewFormat : checking ? 'Execute the approved file assertions and npm verification scripts. Record exit status and output.' : 'Create a short implementation plan, then build the complete requested website in this project folder. Inspect the existing code first. Keep the work coherent and usable. Finish with changed files, checks, remaining issues, and local run instructions.'}\n${delivery.feedback ? `\nPREVIOUS CHECK/REVIEW FEEDBACK — address every failure:\n${delivery.feedback}` : ''}`;
+    const description = `${scope(delivery)}\n${planning ? planInstructions : reviewing ? reviewFormat : checking ? 'Execute the approved file assertions and npm verification scripts. Record exit status and output.' : 'Create a short implementation plan, then complete the requested deliverable in this project folder. Continue from existing work and saved evidence. Resolve routine implementation choices yourself. If a repair repeats a failed approach, diagnose the cause and change the approach; do not repeat the same edits blindly. Inspect the existing code first. Keep the work coherent and usable. Finish with changed files, checks, remaining issues, and local run instructions.'}\n${delivery.feedback ? `\nPREVIOUS CHECK/REVIEW FEEDBACK — address every failure:\n${delivery.feedback}` : ''}`;
     const task = prepareTask({ title: `${planning ? 'Plan' : reviewing ? 'Review' : checking ? 'Verify' : delivery.repairs ? 'Repair' : 'Build'}: ${delivery.title}`, description, projectId: delivery.projectId,
       agentId, deliveryCheck: checking, mode: phase === 'building' ? 'edit' : 'review', requireTools: !checking,
       route: delivery.routing.provider, model: delivery.routing.model, approvedRoute: delivery.approval.routeSnapshot, priority: 'high' });
@@ -197,6 +201,8 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     if (!checking && ++delivery.approval.agentRuns > delivery.approval.maxAgentRuns) throw bad('Approved agent-run limit reached', 409);
     insertTask(task); submitTask(task, { ...delivery.approval, deliveryId: delivery.id });
     delivery.status = phase; delivery.phase = phase; delivery.currentTaskId = task.id; delivery.taskIds.push(task.id);
+    delivery.checkpoints ??= [];
+    delivery.checkpoints.push({ at: now(), phase, taskId: task.id, repair: delivery.repairs, recovery: delivery.recoveryAttempts || 0 });
     delivery.updatedAt = now(); change();
   }
   function approve(delivery) {
@@ -212,19 +218,39 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     if (delivery.repairLimitReached) throw bad('Repair limit reached. Save a revised brief to start another cycle', 409);
     if (delivery.routing.provider !== 'direct' && delivery.routing.provider !== (state.routing.provider || 'omniroute')) throw bad('Configure the brief’s selected provider on Model routing before approving this cycle');
     delivery.approval = { at: now(), projectPath: project.path, routeSnapshot: ['omniroute', 'openrouter'].includes(delivery.routing.provider) ? { ...delivery.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' },
-      agentRuns: 0, maxAgentRuns: (delivery.mission && !delivery.planned ? 1 : 0) + 2 * (delivery.maxRepairs + 1), scope: delivery.mission ? 'Plan standards from the aim, build, run finite local checks, review and repair within the limit; no publication or external writes' : 'Build, local checks and review; no deployment or external writes' };
-    delivery.error = null;
+      reviewStart: delivery.attempts.length, agentRuns: 0, maxAgentRuns: (delivery.mission && !delivery.planned ? 1 : 0) + 2 * (delivery.maxRepairs + 1) + (delivery.maxRecoveries || 0), scope: delivery.mission ? 'Plan standards from the aim, build, run finite local checks, review and repair within the limit; no publication or external writes' : 'Build, local checks and review; no deployment or external writes' };
+    if (!delivery.deadlineAt) delivery.deadlineAt = new Date(Date.now() + (delivery.maxMinutes || 120) * 60000).toISOString();
+    if (Date.parse(delivery.deadlineAt) <= Date.now()) throw bad('Run time budget exhausted. Create a revised mission with a new budget.', 409);
+    delivery.retryAt = null; delivery.error = null;
     addTask(delivery, delivery.mission && !delivery.planned ? 'planning' : 'building'); event(`You approved the bounded delivery cycle: ${delivery.title}`); change(); return delivery;
   }
-  function block(delivery, error) { delivery.status = 'blocked'; delivery.error = text(error, 5000); delivery.updatedAt = now(); event(`Delivery needs attention: ${delivery.title} — ${delivery.error}`, null, 'warning'); change(); }
+  function block(delivery, error) { delivery.retryAt = null; delivery.status = 'blocked'; delivery.error = text(error, 5000); delivery.updatedAt = now(); event(`Delivery needs attention: ${delivery.title} — ${delivery.error}`, null, 'warning'); change(); }
   function repair(delivery, feedback) {
     delivery.feedback = feedback;
+    if (delivery.runPolicy === 'persistent') {
+      const last = delivery.attempts.slice(delivery.approval.reviewStart || 0).slice(-5);
+      const signature = row => row.criteria.filter(c => c.status === 'fail').map(c => c.id).sort().join(',');
+      if (last.length === 5 && last.every(a => a.verdict === 'reject' && signature(a) === signature(last[0]))) {
+        block(delivery, 'Five reviews still fail the same criteria. Progress is stalled; inspect the evidence before continuing.'); return;
+      }
+    }
     if (delivery.repairs >= delivery.maxRepairs) { delivery.repairLimitReached = true; block(delivery, 'Repair limit reached. Review the evidence and create a revised brief.'); return; }
     delivery.repairs++; addTask(delivery, 'building');
   }
   function advance() {
     for (const delivery of state.deliveries) {
       if (!liveStates.includes(delivery.status)) continue;
+      if (delivery.deadlineAt && Date.parse(delivery.deadlineAt) <= Date.now()) {
+        const pending = state.tasks.find(t => t.id === delivery.currentTaskId);
+        if (pending && !['done', 'failed', 'cancelled'].includes(pending.status)) cancelTask(pending);
+        block(delivery, 'Run time budget exhausted. Progress and evidence are saved.'); continue;
+      }
+      if (delivery.retryAt) {
+        if (Date.parse(delivery.retryAt) > Date.now()) continue;
+        delivery.retryAt = null;
+        try { addTask(delivery, delivery.phase); } catch (err) { block(delivery, err.message); }
+        continue;
+      }
       const task = state.tasks.find(t => t.id === delivery.currentTaskId);
       if (!task || active.has(task.id) || !['done', 'failed', 'cancelled'].includes(task.status)) continue;
       try {
@@ -232,7 +258,16 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
         if (task.status !== 'done') {
           // Deterministic check failures are repairable; provider/process failures need attention.
           if (task.deliveryPhase === 'checking' && task.checkResults?.length && task.status !== 'cancelled') repair(delivery, artifactFor(task.id));
-          else block(delivery, task.error || 'Delivery step was cancelled');
+          else {
+            const error = task.error || 'Delivery step was cancelled';
+            const transient = /429|502|503|504|rate.?limit|temporar|overloaded|ECONNRESET|ETIMEDOUT|fetch failed|connection reset|Server (?:restarted before|stopped during)/i.test(error);
+            const permanent = /401|403|quota|credit|billing|authentication|permission|without recorded tool/i.test(error);
+            if (task.status !== 'cancelled' && transient && !permanent && (delivery.recoveryAttempts || 0) < (delivery.maxRecoveries || 0)) {
+              delivery.recoveryAttempts = (delivery.recoveryAttempts || 0) + 1;
+              delivery.retryAt = new Date(Date.now() + 15000 * 2 ** (delivery.recoveryAttempts - 1)).toISOString();
+              event(`Temporary failure; retry ${delivery.recoveryAttempts}/${delivery.maxRecoveries} scheduled: ${delivery.title}`); change();
+            } else block(delivery, error);
+          }
           continue;
         }
         if (task.deliveryPhase === 'planning') { applyPlan(delivery, artifactFor(task.id)); addTask(delivery, 'building'); }
@@ -256,7 +291,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
   }
   function pause(delivery) {
     if (!liveStates.includes(delivery.status)) throw bad('Only an active delivery can be stopped', 409);
-    delivery.status = 'paused'; delivery.updatedAt = now();
+    delivery.retryAt = null; delivery.status = 'paused'; delivery.updatedAt = now();
     const task = state.tasks.find(t => t.id === delivery.currentTaskId);
     if (task && !['done', 'failed', 'cancelled'].includes(task.status)) cancelTask(task);
     event(`Delivery stopped: ${delivery.title}`); change(); return delivery;
@@ -269,13 +304,14 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     if (delivery.status !== 'awaiting_acceptance') throw bad('This delivery is not awaiting acceptance', 409);
     if (!text(feedback)) throw bad('Describe what needs to change');
     // Client feedback invalidates the previous run approval and requires a new explicit approval.
+    delivery.deadlineAt = null;
     delivery.feedback = `CLIENT REVIEW: ${text(feedback, 10000)}`; delivery.status = 'blocked'; delivery.error = 'You requested changes. Review the scope before starting another cycle.'; delivery.approval = null;
     delivery.repairs = 0; delivery.repairLimitReached = false; delivery.updatedAt = now(); change(); return delivery;
   }
   function report(delivery) {
     return `# ${delivery.title}\n\nClient: ${delivery.client || 'Not named'}\nStatus: ${delivery.status}\n\n${scope(delivery)}\n\n## Review history\n${delivery.attempts.map(a => `### ${a.at} — ${a.verdict}\n${a.summary}\n${a.criteria.map(c => `- ${c.id}: ${c.status} — ${c.evidence}`).join('\n')}`).join('\n\n') || 'No review yet.'}\n\n## Task evidence\n${delivery.taskIds.map(taskId => `${artifactFor(taskId)}`).join('\n\n---\n\n')}\n\n${delivery.acceptedAt ? `Accepted by the workspace owner: ${delivery.acceptedAt}` : 'Awaiting owner acceptance. AI review is an assessment, not a guarantee.'}\n`;
   }
-  for (const delivery of state.deliveries) if (liveStates.includes(delivery.status)) { delivery.status = 'blocked'; delivery.error = 'Server restarted during delivery. Review the evidence and approve a new attempt.'; }
+  for (const delivery of state.deliveries) if (liveStates.includes(delivery.status) && !(delivery.runPolicy === 'persistent' && delivery.approval && Date.parse(delivery.deadlineAt) > Date.now())) { delivery.status = 'blocked'; delivery.error = 'Server restarted during delivery. Review the evidence and approve a new attempt.'; }
   return { find, create, mission, approve, advance, pause, accept, reject, report, block };
 }
 
