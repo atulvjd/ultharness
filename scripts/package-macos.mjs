@@ -33,7 +33,7 @@ try {
   mkdirSync(output, { recursive: true });
   rmSync(app, { recursive: true, force: true });
   for (const dir of ['MacOS', 'Resources/app/public', 'Resources/app/desktop', 'Resources/app/scripts', 'Resources/runtime', 'Resources/licenses']) mkdirSync(path.join(contents, dir), { recursive: true });
-  for (const file of ['server.mjs', 'preview.mjs', 'delivery.mjs', 'routing.mjs', 'package.json', 'README.md', 'public/index.html', 'public/app.js', 'public/style.css', 'desktop/server-entry.mjs', 'scripts/aim.mjs']) {
+  for (const file of ['server.mjs', 'preview.mjs', 'delivery.mjs', 'routing.mjs', 'openclaw.mjs', 'scripts/openclaw-mcp.mjs', 'package.json', 'README.md', 'public/index.html', 'public/app.js', 'public/style.css', 'desktop/server-entry.mjs', 'scripts/aim.mjs']) {
     cpSync(path.join(root, file), path.join(resources, 'app', file));
   }
   cpSync(node, path.join(resources, 'runtime/node'));

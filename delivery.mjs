@@ -1,5 +1,7 @@
 import { existsSync, statSync, realpathSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { openClawSettings } from './openclaw.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
@@ -22,6 +24,12 @@ function publicUrl(value) {
 export function connectionSettings(body) {
   const name = text(body.name, 100);
   if (!name) throw bad('Name this connection');
+  if (body.kind === 'openclaw') {
+    let config;
+    try { config = openClawSettings(body); } catch (err) { throw bad(err.message); }
+    if (secretPattern.test(body.notes || '')) throw bad('Keep credentials out of connection notes');
+    return { name, kind: 'mcp', integration: 'openclaw', category: 'mcp', notes: text(body.notes, 2000), transport: 'stdio', command: process.execPath, args: [fileURLToPath(new URL('./scripts/openclaw-mcp.mjs', import.meta.url)), config.url, JSON.stringify(config.tools)], tools: config.tools, env_vars: ['OPENCLAW_GATEWAY_TOKEN', 'OPENCLAW_GATEWAY_PASSWORD'] };
+  }
   const kind = body.kind || 'reference';
   if (!['reference', 'mcp'].includes(kind)) throw bad('Choose a reference or MCP connection');
   const result = { name, kind, category: categories.includes(body.category) ? body.category : 'other', notes: text(body.notes, 2000) };
@@ -53,7 +61,7 @@ export function connectionArgs(kind, connections = []) {
   if (!servers.length) return [];
   if (kind === 'codex') return servers.flatMap(c => {
     const name = `uh_${c.id.replace(/[^a-zA-Z0-9_]/g, '_')}`;
-    const settings = c.transport === 'stdio' ? { command: c.command, args: c.args } : { url: c.url };
+    const settings = c.transport === 'stdio' ? { command: c.command, args: c.args, ...(c.env_vars ? { env_vars: c.env_vars } : {}) } : { url: c.url };
     return Object.entries({ ...settings, enabled_tools: c.tools, required: true }).flatMap(([key, value]) => ['-c', `mcp_servers.${name}.${key}=${JSON.stringify(value)}`]);
   });
   const mcpServers = Object.fromEntries(servers.map(c => [`uh_${c.id.replace(/[^a-zA-Z0-9_]/g, '_')}`, c.transport === 'stdio' ? { command: c.command, args: c.args } : { type: 'http', url: c.url }]));
@@ -120,6 +128,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
       if (!c) throw bad('A selected connection is missing or disabled');
       return clone(c);
     });
+    if (new Set(connections.filter(c => c.integration === 'openclaw').map(c => c.args[1])).size > 1) throw bad('Select a single OpenClaw gateway per mission');
     const maxRepairs = Number(body.maxRepairs ?? 2);
     if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 5) throw bad('Choose 0–5 repair attempts');
     // Validate the reviewer route too, before persisting anything.
@@ -182,8 +191,8 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     task.description = description;
     task.deliveryId = delivery.id; task.deliveryPhase = phase;
     if (checking) task.checks = clone(delivery.checks);
-    // Review runs receive file tools only; external MCP access is for the builder.
-    task.connections = reviewing || checking ? [] : clone(delivery.connections);
+    // Reviews use file tools and the same selected OpenClaw inspection bridge.
+    task.connections = checking ? [] : reviewing ? clone(delivery.connections.filter(c => c.integration === 'openclaw')) : clone(delivery.connections);
     if (!checking && !executable(getAgent(agentId).kind)) throw bad('The selected CLI is no longer available');
     if (!checking && ++delivery.approval.agentRuns > delivery.approval.maxAgentRuns) throw bad('Approved agent-run limit reached', 409);
     insertTask(task); submitTask(task, { ...delivery.approval, deliveryId: delivery.id });

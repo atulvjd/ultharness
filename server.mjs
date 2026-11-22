@@ -42,9 +42,10 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   if (!state.agents.some(a => a.id === 'agent_verify')) state.agents.push({ id: 'agent_verify', name: 'Verifier', role: 'Recorded delivery checks', kind: 'verification', description: 'Runs approved delivery file assertions and npm scripts, records output and exit codes. Scripts execute with this app’s user permissions.', color: 'blue', enabled: true, internal: true });
   // Credentials stay in server memory and are associated with a specific endpoint.
   const routingKeys = new Map();
+  const openClawKeys = new Map();
   if (process.env.OMNIROUTE_API_KEY) routingKeys.set(normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || (state.routing.provider === 'omniroute' ? state.routing.baseUrl : 'http://127.0.0.1:20128/v1')), process.env.OMNIROUTE_API_KEY);
   if (process.env.OPENROUTER_API_KEY) routingKeys.set('https://openrouter.ai/api/v1', process.env.OPENROUTER_API_KEY);
-  const redactions = new Set(routingKeys.values());
+  const redactions = new Set([...routingKeys.values(), process.env.OPENCLAW_GATEWAY_TOKEN, process.env.OPENCLAW_GATEWAY_PASSWORD].filter(Boolean));
   const redact = value => { let text = String(value); for (const key of redactions) if (key) text = text.split(key).join('[gateway key redacted]'); return text; };
   const routingSnapshot = () => ({ ...state.routing, keyConfigured: !!routingKeys.get(state.routing.baseUrl) });
   const active = new Map();
@@ -262,7 +263,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     event(`${agent.name} started “${task.title}”`, task.id);
     change();
     if (agent.kind === 'verification') {
-      runDeliveryChecks({ task, root: project.path, log: value => log(task, value, 'tool'), setChild: child => { if (active.has(task.id)) active.set(task.id, { child }); }, stopped: () => closing || terminal(task.status), environment: (() => { const env = { ...process.env }; delete env.OMNIROUTE_API_KEY; delete env.ULTHARNESS_OMNIROUTE_KEY; delete env.ULTHARNESS_OPENROUTER_KEY; delete env.OPENROUTER_API_KEY; return env; })() }).then(result => {
+      runDeliveryChecks({ task, root: project.path, log: value => log(task, value, 'tool'), setChild: child => { if (active.has(task.id)) active.set(task.id, { child }); }, stopped: () => closing || terminal(task.status), environment: (() => { const env = { ...process.env }; delete env.OMNIROUTE_API_KEY; delete env.ULTHARNESS_OMNIROUTE_KEY; delete env.ULTHARNESS_OPENROUTER_KEY; delete env.OPENROUTER_API_KEY; delete env.OPENCLAW_GATEWAY_TOKEN; delete env.OPENCLAW_GATEWAY_PASSWORD; return env; })() }).then(result => {
         if (closing) return;
         if (terminal(task.status)) { active.delete(task.id); change(); pump(); return; }
         complete(task, result.content, result.passed ? null : 'Recorded verification failed. See check evidence.');
@@ -286,7 +287,10 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     const prompt = `You are ${agent.name}, working in Ultharness. Role: ${agent.role}.\nTask: ${task.title}\n${task.description}\n\n${task.mode === 'edit' ? 'Implement the requested changes within this workspace.' : 'Review and report only. Do not modify files.'}\nDo not launch or delegate to other agents. Return a clear final report describing your findings or changes and validation.\n${context ? `Parent task report:\n${context}` : ''}`;
     log(task, `Starting ${agent.kind} in ${task.mode === 'edit' ? 'workspace edit' : 'review'} mode.`, 'info');
     if (['omniroute', 'openrouter'].includes(task.routeSnapshot?.provider)) log(task, `Model route: ${task.routeSnapshot.provider} · ${task.routeSnapshot.model} · ${task.routeSnapshot.baseUrl}`);
-    const child = spawn(binary, args, { cwd: project.path, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: routingEnvironment(agent.kind, task.routeSnapshot, routingKeys.get(task.routeSnapshot?.baseUrl)) });
+    const runEnv = routingEnvironment(agent.kind, task.routeSnapshot, routingKeys.get(task.routeSnapshot?.baseUrl));
+    const claw = task.connections?.find(c => c.integration === 'openclaw');
+    if (claw && openClawKeys.has(claw.args[1])) runEnv.OPENCLAW_GATEWAY_TOKEN = openClawKeys.get(claw.args[1]);
+    const child = spawn(binary, args, { cwd: project.path, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: runEnv });
     active.set(task.id, { child });
     let result = '';
     let hasReport = false;
@@ -498,6 +502,10 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
         }
         if (route === '/api/connections') {
           const connection = { ...connectionSettings(body), id: id('connection'), enabled: true, createdAt: stamp() };
+          if (body.kind === 'openclaw' && body.apiKey) {
+            if (typeof body.apiKey !== 'string' || body.apiKey.length > 4096 || /[\r\n]/.test(body.apiKey)) throw fail('Invalid OpenClaw gateway token');
+            openClawKeys.set(connection.args[1], body.apiKey.trim()); redactions.add(body.apiKey.trim());
+          }
           state.connections.unshift(connection); event(`Connection saved: ${connection.name}`); change(); return json(connection, 201);
         }
         if (parts[1] === 'connections' && parts[2] && ['toggle', 'delete'].includes(parts[3])) {
