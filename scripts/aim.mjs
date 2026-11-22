@@ -1,6 +1,6 @@
 import path from 'node:path';
 const args=process.argv.slice(2),references=[];
-let aim='',folder='',base=process.env.ULTHARNESS_URL||'http://127.0.0.1:4310',route='direct',model='',maxRepairs=3;
+let aim='',folder='',base=process.env.ULTHARNESS_URL||'http://127.0.0.1:4310',route='direct',model='',maxRepairs,runPolicy='persistent',maxMinutes=720;
 try {
  for(let i=0;i<args.length;i++){
   const value=args[i];
@@ -9,6 +9,8 @@ try {
   else if(value==='--server')base=args[++i];
   else if(value==='--route')route=args[++i];
   else if(value==='--model')model=args[++i];
+  else if(value==='--bounded')runPolicy='bounded';
+  else if(value==='--minutes')maxMinutes=Number(args[++i]);
   else if(value==='--repairs')maxRepairs=Number(args[++i]);
   else if(value.startsWith('--'))throw Error(`Unknown option: ${value}`);
   else aim+=(aim?' ':'')+value;
@@ -19,7 +21,7 @@ try {
  const state=await request('state');let project=folder?state.projects.find(p=>p.path===path.resolve(folder)):state.projects.find(p=>p.available);
  if(!project&&folder)project=await request('projects',{name:path.basename(path.resolve(folder)),path:path.resolve(folder)});
  if(!project)throw Error('Connect a project folder first or pass --project /path');
- const delivery=await request('missions',{aim,references,projectId:project.id,route,model,maxRepairs});
+ const delivery=await request('missions',{aim,references,projectId:project.id,route,model,maxRepairs,runPolicy,maxMinutes});
  console.log(`Started: ${delivery.title}\nWatch: ${base}/#live\nCtrl+C stops this cycle.`);
  let stopping=false;process.once('SIGINT',async()=>{stopping=true;try{await request(`deliveries/${delivery.id}/pause`,{});}catch{}process.exit(130);});
  const seen=new Map();
