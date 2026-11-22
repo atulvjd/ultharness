@@ -3,11 +3,11 @@ const invalid = message => Object.assign(new Error(message), { status: 400 });
 
 export function normalizeBaseUrl(value) {
   let url;
-  try { url = new URL(String(value).trim()); } catch { throw invalid('Enter a valid OmniRoute URL'); }
+  try { url = new URL(String(value).trim()); } catch { throw invalid('Enter a valid model gateway URL'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw invalid('Use an HTTP(S) URL without credentials, query parameters, or a fragment');
   }
-  if (url.protocol === 'http:' && !localHost(url.hostname)) throw invalid('Use HTTPS for a remote OmniRoute server');
+  if (url.protocol === 'http:' && !localHost(url.hostname)) throw invalid('Use HTTPS for a remote model gateway');
   const pathname = url.pathname.replace(/\/+$/, '');
   url.pathname = pathname.endsWith('/v1') ? pathname : `${pathname}/v1`;
   return url.toString().replace(/\/$/, '');
@@ -27,30 +27,30 @@ export async function discoverModels(baseUrl, apiKey = '') {
       headers: { Accept: 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
       signal: AbortSignal.timeout(8000), redirect: 'error'
     });
-  } catch { throw new Error('Cannot reach OmniRoute. Start its server, confirm the URL, and try again.'); }
+  } catch { throw new Error('Cannot reach the model gateway. Confirm its URL and try again.'); }
   if (!response.ok) {
     await response.body?.cancel();
-    if ([401, 403].includes(response.status)) throw new Error('OmniRoute rejected the API key. Add a gateway key and test again.');
-    throw new Error(`OmniRoute model discovery returned HTTP ${response.status}`);
+    if ([401, 403].includes(response.status)) throw new Error('The gateway rejected the API key. Add a gateway key and test again.');
+    throw new Error(`Gateway model discovery returned HTTP ${response.status}`);
   }
   let text = '';
   const decoder = new TextDecoder();
   for await (const chunk of response.body) {
     text += decoder.decode(chunk, { stream: true });
-    if (text.length > 2000000) throw new Error('OmniRoute returned an oversized model catalog');
+    if (text.length > 2000000) throw new Error('The gateway returned an oversized model catalog');
   }
   text += decoder.decode();
   let result;
-  try { result = JSON.parse(text); } catch { throw new Error('OmniRoute did not return a JSON model catalog. Check the base URL.'); }
-  if (!Array.isArray(result.data)) throw new Error('OmniRoute returned an unexpected model catalog');
+  try { result = JSON.parse(text); } catch { throw new Error('The gateway did not return a JSON model catalog. Check the base URL.'); }
+  if (!Array.isArray(result.data)) throw new Error('The gateway returned an unexpected model catalog');
   const models = [...new Set(result.data.filter(m => m && typeof m.id === 'string').map(m => modelId(m.id)).filter(Boolean))].slice(0, 10000).sort();
   return models;
 }
 
 export function routingEnvironment(kind, route, apiKey = '', env = process.env) {
   const result = { ...env, NO_COLOR: '1' };
-  if (route?.provider !== 'omniroute') return result;
-  if (kind === 'codex') result.ULTHARNESS_OMNIROUTE_KEY = apiKey || 'local';
+  if (!['omniroute', 'openrouter'].includes(route?.provider)) return result;
+  if (kind === 'codex') result[route.provider === 'openrouter' ? 'ULTHARNESS_OPENROUTER_KEY' : 'ULTHARNESS_OMNIROUTE_KEY'] = apiKey || 'local';
   if (kind === 'claude') Object.assign(result, {
     ANTHROPIC_BASE_URL: normalizeBaseUrl(route.baseUrl).replace(/\/v1$/, ''),
     ANTHROPIC_AUTH_TOKEN: apiKey || 'local', ANTHROPIC_API_KEY: '', ANTHROPIC_MODEL: route.model,

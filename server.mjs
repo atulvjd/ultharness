@@ -36,12 +36,14 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     tasks: [], routines: [], artifacts: [], events: [], counter: 0
   };
   state.routing ??= { baseUrl: normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || 'http://127.0.0.1:20128/v1'), defaultModel: '', models: [], checkedAt: null, status: 'unchecked', error: null };
+  state.routing.provider ??= new URL(state.routing.baseUrl).hostname === 'openrouter.ai' ? 'openrouter' : 'omniroute';
   state.workflows ??= [];
   state.connections ??= []; state.deliveries ??= [];
   if (!state.agents.some(a => a.id === 'agent_verify')) state.agents.push({ id: 'agent_verify', name: 'Verifier', role: 'Recorded delivery checks', kind: 'verification', description: 'Runs approved delivery file assertions and npm scripts, records output and exit codes. Scripts execute with this app’s user permissions.', color: 'blue', enabled: true, internal: true });
   // Credentials stay in server memory and are associated with a specific endpoint.
   const routingKeys = new Map();
-  if (process.env.OMNIROUTE_API_KEY) routingKeys.set(state.routing.baseUrl, process.env.OMNIROUTE_API_KEY);
+  if (process.env.OMNIROUTE_API_KEY) routingKeys.set(normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || (state.routing.provider === 'omniroute' ? state.routing.baseUrl : 'http://127.0.0.1:20128/v1')), process.env.OMNIROUTE_API_KEY);
+  if (process.env.OPENROUTER_API_KEY) routingKeys.set('https://openrouter.ai/api/v1', process.env.OPENROUTER_API_KEY);
   const redactions = new Set(routingKeys.values());
   const redact = value => { let text = String(value); for (const key of redactions) if (key) text = text.split(key).join('[gateway key redacted]'); return text; };
   const routingSnapshot = () => ({ ...state.routing, keyConfigured: !!routingKeys.get(state.routing.baseUrl) });
@@ -110,7 +112,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     getProject(body.projectId);
     const agent = getAgent(body.agentId);
     if (agent.kind === 'verification' && !internal) throw fail('Verifier is managed by client deliveries');
-    const routing = taskRouting(body, agent);
+    const routing = internal && body.approvedRoute ? (native(agent.kind) ? { provider: 'direct' } : structuredClone(body.approvedRoute)) : taskRouting(body, agent);
     if (!agent.enabled) throw fail('This agent is paused');
     if (body.parentId) getTask(body.parentId);
     if (body.dependsOnId) getTask(body.dependsOnId);
@@ -178,11 +180,14 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     return active.size >= 2 ? 'Both runner slots are in use' : 'Waiting for the next runner slot';
   }
   function taskRouting(body, agent) {
-    if (body.route !== undefined && !['direct', 'omniroute'].includes(body.route)) throw fail('Unknown model route');
-    if (native(agent.kind) || body.route !== 'omniroute') return { provider: 'direct' };
+    if (body.route !== undefined && !['direct', 'omniroute', 'openrouter'].includes(body.route)) throw fail('Unknown model route');
+    if (native(agent.kind) || !['omniroute', 'openrouter'].includes(body.route)) return { provider: 'direct' };
+    if (body.route !== state.routing.provider) throw fail('Select and configure this provider on Model routing first');
+    if (body.route === 'openrouter' && agent.kind !== 'codex') throw fail('The direct OpenRouter route currently requires Codex; route Claude through OmniRoute instead');
+    if (body.route === 'openrouter' && !routingKeys.get(state.routing.baseUrl)) throw fail('Add your OpenRouter API key on Model routing first');
     const model = modelId(body.model || state.routing.defaultModel);
-    if (!model) throw fail('Choose an OmniRoute model or set a default on Model routing');
-    return { provider: 'omniroute', model };
+    if (!model) throw fail('Choose a model or set a default on Model routing');
+    return { provider: body.route, model };
   }
   function artifact(task, content) {
     const item = { id: id('artifact'), taskId: task.id, name: `${task.title}.md`, content: redact(content).slice(0, 200000), createdAt: stamp(), agentId: task.agentId };
@@ -257,7 +262,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     event(`${agent.name} started “${task.title}”`, task.id);
     change();
     if (agent.kind === 'verification') {
-      runDeliveryChecks({ task, root: project.path, log: value => log(task, value, 'tool'), setChild: child => { if (active.has(task.id)) active.set(task.id, { child }); }, stopped: () => closing || terminal(task.status), environment: (() => { const env = { ...process.env }; delete env.OMNIROUTE_API_KEY; delete env.ULTHARNESS_OMNIROUTE_KEY; return env; })() }).then(result => {
+      runDeliveryChecks({ task, root: project.path, log: value => log(task, value, 'tool'), setChild: child => { if (active.has(task.id)) active.set(task.id, { child }); }, stopped: () => closing || terminal(task.status), environment: (() => { const env = { ...process.env }; delete env.OMNIROUTE_API_KEY; delete env.ULTHARNESS_OMNIROUTE_KEY; delete env.ULTHARNESS_OPENROUTER_KEY; delete env.OPENROUTER_API_KEY; return env; })() }).then(result => {
         if (closing) return;
         if (terminal(task.status)) { active.delete(task.id); change(); pump(); return; }
         complete(task, result.content, result.passed ? null : 'Recorded verification failed. See check evidence.');
@@ -274,12 +279,13 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     }
     const binary = executable(agent.kind);
     if (!binary) { complete(task, '', `${agent.kind} is not installed or is not on PATH`); return; }
+    if (task.routeSnapshot?.provider === 'openrouter' && !routingKeys.get(task.routeSnapshot.baseUrl)) { complete(task, '', 'OpenRouter authentication is missing. Configure its API key before resuming.'); return; }
     const args = commandArgs(agent.kind, task.mode, task.routeSnapshot, task.connections);
     const parent = task.parentId ? getTask(task.parentId) : null;
     const context = parent ? state.artifacts.filter(a => a.taskId === parent.id).slice(0, 1).map(a => a.content.slice(0, 20000)).join('\n') : '';
     const prompt = `You are ${agent.name}, working in Ultharness. Role: ${agent.role}.\nTask: ${task.title}\n${task.description}\n\n${task.mode === 'edit' ? 'Implement the requested changes within this workspace.' : 'Review and report only. Do not modify files.'}\nDo not launch or delegate to other agents. Return a clear final report describing your findings or changes and validation.\n${context ? `Parent task report:\n${context}` : ''}`;
     log(task, `Starting ${agent.kind} in ${task.mode === 'edit' ? 'workspace edit' : 'review'} mode.`, 'info');
-    if (task.routeSnapshot?.provider === 'omniroute') log(task, `Model route: OmniRoute · ${task.routeSnapshot.model} · ${task.routeSnapshot.baseUrl}`);
+    if (['omniroute', 'openrouter'].includes(task.routeSnapshot?.provider)) log(task, `Model route: ${task.routeSnapshot.provider} · ${task.routeSnapshot.model} · ${task.routeSnapshot.baseUrl}`);
     const child = spawn(binary, args, { cwd: project.path, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: routingEnvironment(agent.kind, task.routeSnapshot, routingKeys.get(task.routeSnapshot?.baseUrl)) });
     active.set(task.id, { child });
     let result = '';
@@ -368,10 +374,11 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     if (task.dependsOnId && getTask(task.dependsOnId).status !== 'done') {
       throw fail('Complete the dependency before running this task', 409);
     }
+    if (!cycleApproval && !native(agent.kind) && task.routing?.provider !== 'direct' && task.routing?.provider !== state.routing.provider) throw fail('This task’s selected gateway changed. Configure its provider on Model routing before submitting.');
     task.error = null; task.completedAt = null; task.updatedAt = stamp();
     task.submittedAt = stamp();
     delete task.usage; delete task.costUsd;
-    task.routeSnapshot = cycleApproval ? (native(agent.kind) ? { provider: 'direct' } : structuredClone(cycleApproval.routeSnapshot)) : task.routing?.provider === 'omniroute' ? { ...task.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' };
+    task.routeSnapshot = cycleApproval ? (native(agent.kind) ? { provider: 'direct' } : structuredClone(cycleApproval.routeSnapshot)) : ['omniroute', 'openrouter'].includes(task.routing?.provider) ? { ...task.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' };
     task.status = cycleApproval || native(agent.kind) ? 'ready' : 'approval';
     task.approval = cycleApproval ? { requestedAt: cycleApproval.at, decidedAt: cycleApproval.at, decision: 'approved', deliveryId: cycleApproval.deliveryId } : native(agent.kind) ? null : { requestedAt: stamp(), decidedAt: null, decision: null };
     event(cycleApproval ? `Queued under your approved delivery cycle: ${task.title}` : native(agent.kind) ? `Queued “${task.title}” for a local check` : `Approval requested: ${agent.name} · ${task.title}`, task.id, cycleApproval || native(agent.kind) ? 'info' : 'warning');
@@ -469,11 +476,13 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           const baseUrl = normalizeBaseUrl(body.baseUrl || state.routing.baseUrl);
           const defaultModel = modelId(body.defaultModel ?? state.routing.defaultModel);
           if (body.apiKey !== undefined && (typeof body.apiKey !== 'string' || body.apiKey.length > 4096 || /[\r\n]/.test(body.apiKey))) throw fail('Invalid gateway API key');
-          const changedEndpoint = baseUrl !== state.routing.baseUrl;
+          const provider = body.provider || (baseUrl === state.routing.baseUrl ? state.routing.provider : null) || (new URL(baseUrl).hostname === 'openrouter.ai' ? 'openrouter' : 'omniroute');
+          if (!['omniroute', 'openrouter'].includes(provider)) throw fail('Choose OmniRoute or OpenRouter');
+          const changedEndpoint = baseUrl !== state.routing.baseUrl || provider !== state.routing.provider;
           if (body.apiKey?.trim()) { routingKeys.set(baseUrl, body.apiKey.trim()); redactions.add(body.apiKey.trim()); }
           if (body.clearKey === true) routingKeys.delete(baseUrl);
-          state.routing = { ...state.routing, baseUrl, defaultModel, ...(changedEndpoint ? { models: [], checkedAt: null, status: 'unchecked', error: null } : {}) };
-          event('OmniRoute connection settings updated'); change(); return json(routingSnapshot());
+          state.routing = { ...state.routing, provider, baseUrl, defaultModel, ...(changedEndpoint ? { models: [], checkedAt: null, status: 'unchecked', error: null } : {}) };
+          event('Model gateway connection settings updated'); change(); return json(routingSnapshot());
         }
         if (route === '/api/routing/test') {
           const target = state.routing.baseUrl;
@@ -481,7 +490,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
             const models = await discoverModels(target, routingKeys.get(target));
             if (target !== state.routing.baseUrl) throw fail('Connection settings changed during the test. Test the new endpoint.', 409);
             state.routing.models = models; state.routing.checkedAt = stamp(); state.routing.status = 'connected'; state.routing.error = null;
-            event(`OmniRoute connected: ${models.length} models discovered`); change(); return json(routingSnapshot());
+            event(`Model gateway connected: ${models.length} models discovered`); change(); return json(routingSnapshot());
           } catch (err) {
             if (target === state.routing.baseUrl) { state.routing.status = 'error'; state.routing.error = err.message; state.routing.checkedAt = stamp(); change(); }
             throw fail(err.message, err.status || 502);
@@ -618,10 +627,12 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
 
 export function commandArgs(kind, mode, route, connections = []) {
   if (kind === 'codex') {
-    const extra = route?.provider === 'omniroute' ? ['--model', route.model, '-c', 'model_provider="ultharness_omniroute"',
-      '-c', 'model_providers.ultharness_omniroute.name="OmniRoute"', '-c', `model_providers.ultharness_omniroute.base_url=${JSON.stringify(normalizeBaseUrl(route.baseUrl))}`,
-      '-c', 'model_providers.ultharness_omniroute.env_key="ULTHARNESS_OMNIROUTE_KEY"', '-c', 'model_providers.ultharness_omniroute.requires_openai_auth=false',
-      '-c', 'model_providers.ultharness_omniroute.wire_api="responses"'] : [];
+    const routed = ['omniroute', 'openrouter'].includes(route?.provider);
+    const provider = route?.provider === 'openrouter' ? 'openrouter' : 'omniroute';
+    const extra = routed ? ['--model', route.model, '-c', `model_provider="ultharness_${provider}"`,
+      '-c', `model_providers.ultharness_${provider}.name="${provider}"`, '-c', `model_providers.ultharness_${provider}.base_url=${JSON.stringify(normalizeBaseUrl(route.baseUrl))}`,
+      '-c', `model_providers.ultharness_${provider}.env_key="ULTHARNESS_${provider.toUpperCase()}_KEY"`, '-c', `model_providers.ultharness_${provider}.requires_openai_auth=false`,
+      '-c', `model_providers.ultharness_${provider}.wire_api="responses"`] : [];
     // This installed local model rejects the thinking defaults inherited from Codex.
     if (route?.provider === 'omniroute' && route.model === 'ollama-local/llama3.2:3b') extra.push(
       '-c', 'model_reasoning_effort="none"', '-c', 'model_reasoning_summary="none"'

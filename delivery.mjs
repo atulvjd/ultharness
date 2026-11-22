@@ -122,6 +122,8 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     });
     const maxRepairs = Number(body.maxRepairs ?? 2);
     if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 5) throw bad('Choose 0–5 repair attempts');
+    // Validate the reviewer route too, before persisting anything.
+    prepareTask({ title, projectId: body.projectId, agentId: body.reviewerId, route: body.route || 'direct', model: body.model });
     // Validate route and model before persisting a draft, without submitting a job.
     const route = prepareTask({ title, projectId: body.projectId, agentId: body.builderId, route: body.route || 'direct', model: body.model }).routing;
     const delivery = { id: uid('delivery'), title, client: text(body.client, 120), brief,
@@ -175,7 +177,7 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     const description = `${scope(delivery)}\n${planning ? planInstructions : reviewing ? reviewFormat : checking ? 'Execute the approved file assertions and npm verification scripts. Record exit status and output.' : 'Create a short implementation plan, then build the complete requested website in this project folder. Inspect the existing code first. Keep the work coherent and usable. Finish with changed files, checks, remaining issues, and local run instructions.'}\n${delivery.feedback ? `\nPREVIOUS CHECK/REVIEW FEEDBACK — address every failure:\n${delivery.feedback}` : ''}`;
     const task = prepareTask({ title: `${planning ? 'Plan' : reviewing ? 'Review' : checking ? 'Verify' : delivery.repairs ? 'Repair' : 'Build'}: ${delivery.title}`, description, projectId: delivery.projectId,
       agentId, deliveryCheck: checking, mode: phase === 'building' ? 'edit' : 'review', requireTools: !checking,
-      route: delivery.routing.provider, model: delivery.routing.model, priority: 'high' });
+      route: delivery.routing.provider, model: delivery.routing.model, approvedRoute: delivery.approval.routeSnapshot, priority: 'high' });
     // Delivery prompts are intentionally longer than ordinary task notes.
     task.description = description;
     task.deliveryId = delivery.id; task.deliveryPhase = phase;
@@ -199,7 +201,8 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     }
     if (state.deliveries.some(d => d.id !== delivery.id && d.projectId === delivery.projectId && [...liveStates, 'awaiting_acceptance'].includes(d.status))) throw bad('Another delivery is using this project', 409);
     if (delivery.repairLimitReached) throw bad('Repair limit reached. Save a revised brief to start another cycle', 409);
-    delivery.approval = { at: now(), projectPath: project.path, routeSnapshot: delivery.routing.provider === 'omniroute' ? { ...delivery.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' },
+    if (delivery.routing.provider !== 'direct' && delivery.routing.provider !== (state.routing.provider || 'omniroute')) throw bad('Configure the brief’s selected provider on Model routing before approving this cycle');
+    delivery.approval = { at: now(), projectPath: project.path, routeSnapshot: ['omniroute', 'openrouter'].includes(delivery.routing.provider) ? { ...delivery.routing, baseUrl: state.routing.baseUrl } : { provider: 'direct' },
       agentRuns: 0, maxAgentRuns: (delivery.mission && !delivery.planned ? 1 : 0) + 2 * (delivery.maxRepairs + 1), scope: delivery.mission ? 'Plan standards from the aim, build, run finite local checks, review and repair within the limit; no publication or external writes' : 'Build, local checks and review; no deployment or external writes' };
     delivery.error = null;
     addTask(delivery, delivery.mission && !delivery.planned ? 'planning' : 'building'); event(`You approved the bounded delivery cycle: ${delivery.title}`); change(); return delivery;
