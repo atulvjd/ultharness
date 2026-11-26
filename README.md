@@ -76,6 +76,10 @@ Optional environment variables:
 
 ## OmniRoute
 
+For an OmniRoute-only setup, set `ULTHARNESS_OMNIROUTE_ONLY=1`, `ULTHARNESS_OMNIROUTE_MODEL=ultharness-free`, the gateway URL, and a restricted `OMNIROUTE_API_KEY` in the ignored `.env`. Set the same values in the desktop app's private `settings.env` when using its bundled server. New UI and CLI missions use that combo; the server rejects direct-account and other-model runs, including old approved tasks. Missing keys or an unavailable gateway stop execution. Existing tasks and briefs retain their original route and must be recreated to use the locked combo.
+
+The gateway key must restrict models, combos, and provider connections to the intended free or local routes. The local `ultharness-free` setup uses catalog entries advertising zero input/output prices and local Ollama as a final fallback, with key-level compression enabled. Codex still supplies the agent loop and file tools, with `requires_openai_auth=false`; inference goes through OmniRoute instead of the Codex account. This combo disables reasoning effort and summaries for compatibility with small models and to reduce token use. Catalog pricing and tool support do not prove a successful coding run. Free cloud providers have changing quotas and data-handling terms; local inference has hardware limits. Installing a router does not grant a token balance or 1.6 billion free tokens.
+
 OmniRoute can route model requests from either installed coding CLI. The CLI still runs the agent loop and tools; OmniRoute handles upstream providers, model aliases, and fallback policies.
 
 1. Start your OmniRoute instance with `npm run gateway`. This uses the installed `omniroute` CLI on loopback at port 20128. The launcher runs from your home directory and removes Ultharness's client routing variables from the child environment. OmniRoute also reads `.env` from its working directory, so launching it directly from this project can incorrectly treat the app's scoped client key as a server key.
