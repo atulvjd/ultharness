@@ -14,6 +14,10 @@
     "test": "node --test test/*.test.mjs",
     "check": "node --check server.mjs && node --check routing.mjs && node --check openclaw.mjs && node --check scripts/openclaw-mcp.mjs && node --check scripts/start-omniroute.mjs && node --check public/app.js && node --check scripts/package-macos.mjs && node --check desktop/server-entry.mjs && node --check delivery.mjs && node --check preview.mjs && node --check scripts/aim.mjs",
     "package:mac": "node scripts/package-macos.mjs",
-    "aim": "node scripts/aim.mjs"
+    "aim": "node scripts/aim.mjs",
+    "verify:ca-firm": "node scripts/verify-ca-firm.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.1"
   }
 }
