@@ -1,6 +1,6 @@
 import path from 'node:path';
 const args=process.argv.slice(2),references=[];
-let aim='',folder='',base=process.env.ULTHARNESS_URL||'http://127.0.0.1:4310',route='direct',model='',maxRepairs,runPolicy='persistent',maxMinutes=720;
+let aim='',folder='',base=process.env.ULTHARNESS_URL||'http://127.0.0.1:4310',route,model='',maxRepairs,runPolicy='persistent',maxMinutes=720;
 try {
  for(let i=0;i<args.length;i++){
   const value=args[i];

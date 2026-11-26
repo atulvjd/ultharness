@@ -37,6 +37,15 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   };
   state.routing ??= { baseUrl: normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || 'http://127.0.0.1:20128/v1'), defaultModel: '', models: [], checkedAt: null, status: 'unchecked', error: null };
   state.routing.provider ??= new URL(state.routing.baseUrl).hostname === 'openrouter.ai' ? 'openrouter' : 'omniroute';
+  const routeLock = process.env.ULTHARNESS_OMNIROUTE_ONLY === '1' ? {
+    provider: 'omniroute', baseUrl: normalizeBaseUrl(process.env.OMNIROUTE_BASE_URL || 'http://127.0.0.1:20128/v1'),
+    model: modelId(process.env.ULTHARNESS_OMNIROUTE_MODEL || 'ultharness-free')
+  } : null;
+  if (routeLock) {
+    const changed = state.routing.provider !== routeLock.provider || state.routing.baseUrl !== routeLock.baseUrl;
+    Object.assign(state.routing, { provider: routeLock.provider, baseUrl: routeLock.baseUrl, defaultModel: routeLock.model });
+    if (changed) Object.assign(state.routing, { models: [], checkedAt: null, status: 'unchecked', error: null });
+  }
   state.workflows ??= [];
   state.connections ??= []; state.deliveries ??= [];
   if (!state.agents.some(a => a.id === 'agent_verify')) state.agents.push({ id: 'agent_verify', name: 'Verifier', role: 'Recorded delivery checks', kind: 'verification', description: 'Runs approved delivery file assertions and npm scripts, records output and exit codes. Scripts execute with this app’s user permissions.', color: 'blue', enabled: true, internal: true });
@@ -47,7 +56,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
   if (process.env.OPENROUTER_API_KEY) routingKeys.set('https://openrouter.ai/api/v1', process.env.OPENROUTER_API_KEY);
   const redactions = new Set([...routingKeys.values(), process.env.OPENCLAW_GATEWAY_TOKEN, process.env.OPENCLAW_GATEWAY_PASSWORD].filter(Boolean));
   const redact = value => { let text = String(value); for (const key of redactions) if (key) text = text.split(key).join('[gateway key redacted]'); return text; };
-  const routingSnapshot = () => ({ ...state.routing, keyConfigured: !!routingKeys.get(state.routing.baseUrl) });
+  const routingSnapshot = () => ({ ...state.routing, locked: !!routeLock, defaultRoute: routeLock ? 'omniroute' : 'direct', keyConfigured: !!routingKeys.get(state.routing.baseUrl) });
   const active = new Map();
   const previews = new Map();
   const clients = new Set();
@@ -181,14 +190,22 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
     return active.size >= 2 ? 'Both runner slots are in use' : 'Waiting for the next runner slot';
   }
   function taskRouting(body, agent) {
+    body = { ...body, route: body.route ?? (routeLock ? 'omniroute' : 'direct') };
     if (body.route !== undefined && !['direct', 'omniroute', 'openrouter'].includes(body.route)) throw fail('Unknown model route');
-    if (native(agent.kind) || !['omniroute', 'openrouter'].includes(body.route)) return { provider: 'direct' };
+    if (native(agent.kind)) return { provider: 'direct' };
+    if (routeLock) assertAllowedRoute({ provider: body.route, model: body.model || state.routing.defaultModel, baseUrl: state.routing.baseUrl });
+    if (!['omniroute', 'openrouter'].includes(body.route)) return { provider: 'direct' };
     if (body.route !== state.routing.provider) throw fail('Select and configure this provider on Model routing first');
     if (body.route === 'openrouter' && agent.kind !== 'codex') throw fail('The direct OpenRouter route currently requires Codex; route Claude through OmniRoute instead');
     if (body.route === 'openrouter' && !routingKeys.get(state.routing.baseUrl)) throw fail('Add your OpenRouter API key on Model routing first');
     const model = modelId(body.model || state.routing.defaultModel);
     if (!model) throw fail('Choose a model or set a default on Model routing');
     return { provider: body.route, model };
+  }
+  function assertAllowedRoute(route) {
+    if (routeLock && (route?.provider !== routeLock.provider || route?.baseUrl !== routeLock.baseUrl || route?.model !== routeLock.model)) {
+      throw fail('This server is locked to the configured OmniRoute combo. Direct CLI accounts and other model routes are disabled.', 409);
+    }
   }
   function artifact(task, content) {
     const item = { id: id('artifact'), taskId: task.id, name: `${task.title}.md`, content: redact(content).slice(0, 200000), createdAt: stamp(), agentId: task.agentId };
@@ -279,6 +296,9 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
       return;
     }
     const binary = executable(agent.kind);
+    try { assertAllowedRoute(task.routeSnapshot); }
+    catch (error) { complete(task, '', error.message); return; }
+    if (routeLock && !routingKeys.get(routeLock.baseUrl)) { complete(task, '', 'The restricted OmniRoute key is missing. Restore it before running AI tasks.'); return; }
     if (!binary) { complete(task, '', `${agent.kind} is not installed or is not on PATH`); return; }
     if (task.routeSnapshot?.provider === 'openrouter' && !routingKeys.get(task.routeSnapshot.baseUrl)) { complete(task, '', 'OpenRouter authentication is missing. Configure its API key before resuming.'); return; }
     const args = commandArgs(agent.kind, task.mode, task.routeSnapshot, task.connections);
@@ -481,6 +501,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           const defaultModel = modelId(body.defaultModel ?? state.routing.defaultModel);
           if (body.apiKey !== undefined && (typeof body.apiKey !== 'string' || body.apiKey.length > 4096 || /[\r\n]/.test(body.apiKey))) throw fail('Invalid gateway API key');
           const provider = body.provider || (baseUrl === state.routing.baseUrl ? state.routing.provider : null) || (new URL(baseUrl).hostname === 'openrouter.ai' ? 'openrouter' : 'omniroute');
+          assertAllowedRoute({ provider, baseUrl, model: defaultModel });
           if (!['omniroute', 'openrouter'].includes(provider)) throw fail('Choose OmniRoute or OpenRouter');
           const changedEndpoint = baseUrl !== state.routing.baseUrl || provider !== state.routing.provider;
           if (body.apiKey?.trim()) { routingKeys.set(baseUrl, body.apiKey.trim()); redactions.add(body.apiKey.trim()); }
@@ -642,7 +663,7 @@ export function commandArgs(kind, mode, route, connections = []) {
       '-c', `model_providers.ultharness_${provider}.env_key="ULTHARNESS_${provider.toUpperCase()}_KEY"`, '-c', `model_providers.ultharness_${provider}.requires_openai_auth=false`,
       '-c', `model_providers.ultharness_${provider}.wire_api="responses"`] : [];
     // This installed local model rejects the thinking defaults inherited from Codex.
-    if (route?.provider === 'omniroute' && route.model === 'ollama-local/llama3.2:3b') extra.push(
+    if (route?.provider === 'omniroute' && ['ollama-local/llama3.2:3b', 'ultharness-free'].includes(route.model)) extra.push(
       '-c', 'model_reasoning_effort="none"', '-c', 'model_reasoning_summary="none"'
     );
     return ['exec', '--json', '--color', 'never', '--sandbox', mode === 'edit' ? 'workspace-write' : 'read-only', '-c', 'approval_policy="never"', '--skip-git-repo-check', ...extra, ...connectionArgs(kind, connections), '-'];

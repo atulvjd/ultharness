@@ -135,9 +135,9 @@ export function createDeliveryManager({ state, getProject, getAgent, prepareTask
     const maxMinutes = Number(body.maxMinutes ?? (persistent ? 720 : 120));
     if (!Number.isInteger(maxMinutes) || maxMinutes < 1 || maxMinutes > 1440) throw bad('Choose a run time budget of 1–1440 minutes');
     // Validate the reviewer route too, before persisting anything.
-    prepareTask({ title, projectId: body.projectId, agentId: body.reviewerId, route: body.route || 'direct', model: body.model });
+    prepareTask({ title, projectId: body.projectId, agentId: body.reviewerId, route: body.route, model: body.model });
     // Validate route and model before persisting a draft, without submitting a job.
-    const route = prepareTask({ title, projectId: body.projectId, agentId: body.builderId, route: body.route || 'direct', model: body.model }).routing;
+    const route = prepareTask({ title, projectId: body.projectId, agentId: body.builderId, route: body.route, model: body.model }).routing;
     const delivery = { id: uid('delivery'), title, client: text(body.client, 120), brief,
       projectId: body.projectId, builderId: body.builderId, reviewerId: body.reviewerId, routing: route,
       criteria: body.criteria.map((criterion, i) => ({ id: `AC-${i + 1}`, text: criterion.trim() })), checks: body.checks.map(checkSettings), connections,
