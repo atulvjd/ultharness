@@ -239,10 +239,11 @@ function filterModels() {
   const noMatches = $('#catalog-no-matches'); if (noMatches) noMatches.hidden = visible > 0;
 }
 function routingPage() {
-  const r = state.routing;
+  const r = state.routing.locked ? { ...state.routing, models: [state.routing.defaultModel] } : state.routing;
   const gateway = r.provider === 'openrouter' ? 'OpenRouter' : 'OmniRoute';
   const dashboard = r.provider === 'openrouter' ? 'https://openrouter.ai/' : r.baseUrl.replace(/\/v1$/, '');
   return `${heading('ONE GATEWAY, YOUR CHOICE OF MODELS', 'Model routing', 'Connect OpenRouter or OmniRoute, then choose a model for your mission.', `<a class="button" href="${e(dashboard)}" target="_blank" rel="noopener noreferrer">${icon('link')}Open ${gateway}</a>`)}
+    ${r.locked ? '<div class="info-strip">OmniRoute-only mode is enabled. This server blocks direct CLI accounts and other models. Gateway settings are fixed by the local environment.</div>' : ''}
     <div class="routing-flow"><div>${icon('tasks')}<span>Ultharness task</span></div>${icon('arrow')}<div>${icon('terminal')}<span>Codex or Claude</span></div>${icon('arrow')}<div class="flow-accent">${icon('link')}<span>${gateway}</span></div>${icon('arrow')}<div>${icon('code')}<span>Your chosen model</span></div></div>
     ${r.models.length ? `<div class="provider-grid">${providerCards()}</div><div class="catalog-controls"><span>Catalog access does not verify model availability or remaining quota.</span><button class="text-button" data-action="provider-filter" data-prefix="">Show all providers</button></div>` : ''}
     ${r.defaultModel ? `<div class="default-route panel"><span class="routine-icon">${icon('link')}</span><div><small>DEFAULT MODEL OR COMBO</small><strong>${e(r.defaultModel)}</strong><p>Try a short response through your coding agent and save the result as a task report.</p></div><button class="button primary" data-action="model-demo" data-model="${e(r.defaultModel)}">${icon('play')}Create demo task</button></div>` : ''}
@@ -259,6 +260,7 @@ function routingPage() {
 }
 
 function routingFields(routing = { provider: 'direct' }) {
+  if (state.routing.locked) return `<div data-routing-fields><input type="hidden" name="route" value="omniroute"><input type="hidden" name="model" value="${e(state.routing.defaultModel)}"><p class="route-form-help">OmniRoute only · ${e(state.routing.defaultModel)}. Direct CLI accounts and other model routes are disabled on this server.</p></div>`;
   return `<div data-routing-fields><div class="form-row"><label>Model route<select name="route"><option value="direct" ${routing.provider === 'direct' ? 'selected' : ''}>CLI default</option><option value="${state.routing.provider || 'omniroute'}" ${routing.provider !== 'direct' ? 'selected' : ''}>${state.routing.provider === 'openrouter' ? 'OpenRouter (Codex)' : 'OmniRoute'}</option></select></label><label data-model-field ${routing.provider !== 'direct' ? '' : 'hidden'}>Model or combo<input name="model" list="task-route-models" maxlength="200" value="${e(routing.model || state.routing.defaultModel)}" placeholder="Exact model ID"><datalist id="task-route-models">${state.routing.models.map(model => `<option value="${e(model)}"></option>`).join('')}</datalist></label></div><p class="route-form-help">Your configured gateway routes model requests. Your selected agent still handles tools and workspace access.</p></div>`;
 }
 function syncRoutingFields(form) {
@@ -267,7 +269,8 @@ function syncRoutingFields(form) {
   if (!fields) return;
   fields.hidden = isNative(agent(form.elements.agentId.value));
   for (const field of $$('[data-tool-requirement], [data-tool-requirement-help]', form)) field.hidden = fields.hidden;
-  $('[data-model-field]', form).hidden = form.elements.route.value === 'direct';
+  const modelField = $('[data-model-field]', form);
+  if (modelField) modelField.hidden = form.elements.route.value === 'direct';
 }
 
 function openDialog(title, content, wide = false) {
