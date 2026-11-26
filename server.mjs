@@ -514,48 +514,7 @@ export function createApp({ dataDir = process.env.ULTHARNESS_DATA || path.join(H
           else connection.enabled = !connection.enabled;
           event(`Connection ${parts[3] === 'delete' ? 'removed' : connection.enabled ? 'enabled' : 'disabled'}: ${connection.name}`); change(); return json({ ok: true });
         }
-        if (route === '/api/newt/stop-all') {
-          const running = state.deliveries.filter(d => ['planning','building','checking','reviewing'].includes(d.status));
-          const others = state.tasks.filter(t => !t.deliveryId && ['running','ready'].includes(t.status));
-          for (const delivery of running) deliveries.pause(delivery);
-          for (const task of others) cancelManagedTask(task);
-          event('Newt stopped active workspace runs'); change();
-          return json({ deliveries: running.length, tasks: others.length });
-        }
-        if (route === '/api/newt/forget') {
-          delete state.newtShortcut; change(); return json({ ok: true });
-        }
-        if (route === '/api/missions' || route === '/api/newt/missions') {
-          let input = body;
-          if (route === '/api/newt/missions') {
-            const shortcut = state.newtShortcut;
-            if (!shortcut) throw fail('Choose a project for Newt in the mission form first.', 409);
-            const { settings, projectPath, routeSnapshot, connections } = shortcut;
-            if (getProject(settings.projectId).path !== projectPath ||
-                (routeSnapshot.provider !== 'direct' && (routeSnapshot.provider !== state.routing.provider || routeSnapshot.baseUrl !== state.routing.baseUrl)) ||
-                connections.some(c => JSON.stringify(c) !== JSON.stringify(state.connections.find(item => item.id === c.id)))) {
-              throw fail('The saved project, route, or connection changed. Review the settings in a new mission.', 409);
-            }
-            for (const id of [settings.builderId, settings.reviewerId]) {
-              const agent = getAgent(id);
-              if (!agent.enabled || !executable(agent.kind)) throw fail('The coding agent selected for Newt is unavailable.', 409);
-            }
-            input = { ...settings, aim: body.aim };
-          }
-          const delivery = deliveries.mission(input);
-          if (route === '/api/missions' && body.rememberNewt === true) {
-            const connections = delivery.connections.filter(c => input.connectionIds?.includes(c.id));
-            state.newtShortcut = {
-              projectPath: delivery.approval.projectPath, routeSnapshot: structuredClone(delivery.approval.routeSnapshot),
-              connections: structuredClone(connections),
-              settings: { projectId: delivery.projectId, builderId: delivery.builderId, reviewerId: delivery.reviewerId,
-                route: delivery.routing.provider, model: delivery.routing.model, connectionIds: connections.map(c => c.id),
-                runPolicy: delivery.runPolicy, maxMinutes: delivery.maxMinutes, maxRepairs: delivery.maxRepairs }
-            };
-            change();
-          }
-          pump(); return json(delivery, 201);
-        }
+        if (route === '/api/missions') { const delivery = deliveries.mission(body); pump(); return json(delivery, 201); }
         if (route === '/api/deliveries') return json(deliveries.create(body), 201);
         if (parts[1] === 'deliveries' && parts[2]) {
           const delivery = deliveries.find(parts[2]);

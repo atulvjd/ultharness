@@ -34,33 +34,3 @@ test('preview serves real output, notices changes, and rejects private files and
  writeFileSync(path.join(f.root,'index.html'),'<html><h1>Home preview</h1></html>');writeFileSync(path.join(f.root,'.env'),'SECRET');writeFileSync(path.join(f.dir,'outside.html'),'PRIVATE');symlinkSync(path.join(f.dir,'outside.html'),path.join(f.root,'escape.html'));
  const preview=await f.request(`deliveries/${d.id}/preview`);assert.equal(preview.status,200);const html=await fetch(preview.body.url);assert.match(await html.text(),/Home preview/);assert.match(html.headers.get('content-security-policy'),/sandbox allow-scripts/);const before=await(await fetch(preview.body.url+'/__revision')).json();writeFileSync(path.join(f.root,'index.html'),'<h1>Changed live preview</h1>');const after=await(await fetch(preview.body.url+'/__revision')).json();assert.notEqual(before.revision,after.revision);assert.equal((await fetch(preview.body.url+'/.env')).status,403);assert.equal((await fetch(preview.body.url+'/escape.html')).status,404);assert.equal((await fetch(preview.body.url+'/package.json')).status,404);
 });
-
-test('Newt reuses only the saved project settings and keeps references specific to the current aim', async t => {
-  const f = await fixture(t);
-  const initial = await f.request('newt/missions', { aim: 'A spoken aim' });
-  assert.equal(initial.status, 409);
-  const connection = await f.request('connections', { kind: 'reference', name: 'Shared brief', file: 'reference.md' });
-  const first = await f.request('missions', {
-    projectId: 'project_home', aim: 'Build the first site', references: ['https://example.com/first'],
-    connectionIds: [connection.body.id], runPolicy: 'persistent', maxRepairs: 3, maxMinutes: 45, rememberNewt: true
-  });
-  assert.equal(first.status, 201);
-  await f.until(s => s.deliveries[0].status === 'awaiting_acceptance');
-  await f.request('deliveries/' + first.body.id + '/accept', {});
-  const next = await f.request('newt/missions', { aim: 'Build another site', projectId: 'wrong', route: 'openrouter' });
-  assert.equal(next.status, 201);
-  assert.equal(next.body.projectId, 'project_home');
-  assert.equal(next.body.brief, 'Build another site');
-  assert.equal(next.body.maxMinutes, 45);
-  assert.deepEqual(next.body.routing, first.body.routing);
-  assert.deepEqual(next.body.connections.map(c => c.id), [connection.body.id]);
-  const stopped = await f.request('newt/stop-all', {});
-  assert.equal(stopped.body.deliveries, 1);
-  const state = (await f.request('state')).body;
-  assert.equal(state.deliveries[0].status, 'paused');
-  await f.request('connections/' + connection.body.id + '/toggle', {});
-  assert.equal((await f.request('newt/missions', { aim: 'A third aim' })).status, 409);
-  assert.equal((await f.request('state')).body.deliveries.length, 2);
-  await f.request('newt/forget', {});
-  assert.equal((await f.request('newt/missions', { aim: 'A fourth aim' })).status, 409);
-});

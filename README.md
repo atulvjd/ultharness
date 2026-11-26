@@ -2,17 +2,9 @@
 
 A local workspace for client delivery, coding agents, and recurring operations. Turn a detailed brief into implementation, recorded checks, independent review, and bounded repair cycles.
 
-## Newt and Ultharness on Mac
+## Separate desktop apps
 
-The combined desktop app includes Newt’s voice and text command center, notch, Mac controls, utilities and browser integration alongside the Ultharness mission workspace. Build it from this checkout with `npm run package:mac`. Install `dist/Ultharness-0.14.0-arm64.dmg` on Apple Silicon (the Intel build uses `x64`). Quit older Newtv1 and Ultharness desktop copies first. The unified app uses Newtv1’s bundle identifier and settings and opens the existing Ultharness desktop data directory. macOS may ask you to grant permissions to the newly signed application.
-
-Open **Talk with Newt** on the dashboard or use **Option–Space**. Say or type **“Start mission build a website for my client”**. On the first run, choose the project, add references, and click **Start & watch live**. Select **Use this project…** to authorize subsequent “start mission” commands with that folder, model route, reusable connections and limits. One-off reference links belong to the individual mission. Clear the saved configuration in the mission form. If a saved folder, connection or endpoint changes, Newt opens the form for review.
-
-Say **“mission status”** to see progress, **“stop mission”** to pause a single active mission, or **“open missions”** to return to the dashboard. Newt shows mission progress in its command center and adds notices when the selected mission needs attention. Newt’s **Stop All Actions** also stops active harness tasks and deliveries. The normal mission acceptance controls apply.
-
-Newt’s speech and assistant settings live in its command center. Mission models use **Model routing** in Ultharness. The desktop app bundles Node, npm and the Newt browser and screen helpers. The optional browser extension and its installer are in the disk image’s **Extras** folder. The browser dashboard and aim CLI still run independently with `npm start`. Native voice and notch controls run in the Mac app.
-
-Newt sources are in `newt/`, imported from Newtv1 revision `7237df8`. See [the Newt guide](newt/README.md) for voice modes, shortcuts and Mac utilities.
+Ultharness is the coding and delivery workspace. Newt is maintained in its own `newtv1` repository with a separate app, bundle identifier, settings, and installer. Build Ultharness here with `npm run package:mac`; build Newt from its own repository with `bash scripts/build-app.sh`. Ultharness does not bundle or launch Newt.
 
 ## One aim → persistent live delivery · 0.5.0
 
