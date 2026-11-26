@@ -1,5 +1,12 @@
 Ultharness for Mac
 
+NEWT AND MISSIONS
+Quit older copies of Newtv1 and Ultharness first. Open the combined app,
+click Talk with Newt, or press Option-Space. Say "start mission build a client
+website". Choose a project and start the run. Select the saved settings option
+to start future aims by voice alone. Use "mission status" or "stop mission".
+The optional browser extension and installer are in Extras/Browser Integration.
+
 INSTALL
 Drag Ultharness.app onto Applications, then open it from Applications.
 This build is for Apple Silicon Macs running macOS 14 or later.

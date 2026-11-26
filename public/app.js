@@ -26,6 +26,7 @@ const glyphs = {
   monitor: 'M3 3h18v14H3z M8 21h8 M12 17v4', code: 'M8 5l-7 7 7 7 M16 5l7 7-7 7 M14 3l-4 18'
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${glyphs[name] || glyphs.grid}"/></svg>`;
+const newt = window.webkit?.messageHandlers?.newt;
 let state;
 let view = location.hash.slice(1) || 'overview';
 let lane = 'all';
@@ -75,7 +76,15 @@ async function refresh() {
 }
 function navigate(next) { mobileMenuOpen = false; view = next; query = ''; location.hash = next; render(); window.scrollTo(0, 0); }
 
+let lastNewtProgress = '';
 function render() {
+  if (newt) {
+    const mission = state.deliveries.find(d => d.mission && d.id === liveDeliveryId) || state.deliveries.find(d => d.mission);
+    if (mission && lastNewtProgress !== mission.id + mission.status) {
+      lastNewtProgress = mission.id + mission.status;
+      newt.postMessage({id: mission.id, title: mission.title, status: mission.status});
+    }
+  }
   const liveLog = $('.mission-log');
   const logPosition = liveLog ? { top: liveLog.scrollTop, follow: liveLog.scrollHeight - liveLog.scrollTop - liveLog.clientHeight < 60 } : null;
   const expandedDetails = $$('main details[data-preserve-key][open]').map(el => el.dataset.preserveKey);
@@ -129,7 +138,7 @@ function overview(approvals, running) {
   const waiting = deliveries.filter(d => ['blocked', 'awaiting_acceptance'].includes(d.status));
   const accepted = deliveries.filter(d => d.status === 'accepted');
   const team = state.agents.filter(a => !a.internal);
-  return `${heading('WORKSPACE OVERVIEW', 'Good work starts here<span class="accent">.</span>', 'A clear view of your projects, your agents, and what comes next.', button('New task', 'new-task', 'plus', 'subtle') + button('Start with an aim', 'new-mission', 'spark', 'primary'))}
+  return `${heading('WORKSPACE OVERVIEW', 'Good work starts here<span class="accent">.</span>', 'A clear view of your projects, your agents, and what comes next.', (newt ? button('Talk with Newt', 'open-newt', 'spark', 'subtle') : '') + button('New task', 'new-task', 'plus', 'subtle') + button('Start with an aim', 'new-mission', 'spark', 'primary'))}
   <div class="summary-grid">
     <div class="summary-card"><div class="summary-label">Active deliveries <span class="stat-icon">${icon('folder')}</span></div><div class="summary-value">${active.length}<span>in progress</span></div><div class="summary-caption"><span class="dot lime-dot"></span>${deliveries.length} ${deliveries.length === 1 ? 'client brief' : 'client briefs'} in your workspace</div></div>
     <div class="summary-card"><div class="summary-label">Agents working <span class="stat-icon">${icon('team')}</span></div><div class="summary-value">${running.length}<span>running now</span></div><div class="summary-caption">${team.filter(a => a.available && a.enabled).length} of ${team.length} team members available</div></div>
@@ -357,6 +366,8 @@ document.addEventListener('click', async event => {
     if (action === 'open-delivery') { closeDialog(); mobileMenuOpen = false; deliveryFilter = 'all'; navigate('deliveries'); document.getElementById(id)?.scrollIntoView({ block: 'center' }); return; }
     if (action === 'delivery-filter') { deliveryFilter = trigger.dataset.filter; render(); return; }
     if (action === 'close-dialog') return closeDialog();
+    if (action === 'open-newt') { newt?.postMessage('openNewt'); return; }
+    if (action === 'forget-newt') { await api('newt/forget', {}); await refresh(); toast('Newt will ask for a project on the next mission.'); return; }
     if (action === 'new-mission') return missionForm();
     if (action === 'watch-mission') { liveDeliveryId = id; sessionStorage.setItem('uh-live-delivery', id); closeDialog(); navigate('live'); return; }
     if (action === 'mission-preview') {
@@ -445,7 +456,7 @@ document.addEventListener('submit', async event => {
   const submitButtons = [...form.querySelectorAll('button[type="submit"]')]; submitButtons.forEach(button => button.disabled = true);
   try {
     if (form.id === 'mission-form') {
-      const delivery = await api('missions', { ...values, references: values.references.split('\n').map(v => v.trim()).filter(Boolean), connectionIds: new FormData(form).getAll('connectionIds'), maxRepairs: values.runPolicy === 'persistent' ? 100 : 3, maxMinutes: Number(values.maxMinutes) });
+      const delivery = await api('missions', { ...values, rememberNewt: !!newt && values.rememberNewt === 'on', references: values.references.split('\n').map(v => v.trim()).filter(Boolean), connectionIds: new FormData(form).getAll('connectionIds'), maxRepairs: values.runPolicy === 'persistent' ? 100 : 3, maxMinutes: Number(values.maxMinutes) });
       liveDeliveryId = delivery.id; sessionStorage.setItem('uh-live-delivery', delivery.id); closeDialog(); await refresh(); navigate('live'); return;
     }
     if (form.id === 'delivery-form') {
@@ -530,9 +541,10 @@ function deliveriesPage() {
       ${d.status === 'awaiting_acceptance' ? '<p class="route-form-help">Checks passed and the AI reviewer approved each criterion. Inspect the website and evidence before accepting. Publication is a separate action.</p>' : ''}</div></article>`;
   }).join('')}</div>` : state.deliveries.length ? empty('No deliveries in this view.', 'Choose another filter to see the rest of your client work.', '<button class="button subtle" data-action="delivery-filter" data-filter="all">Show all deliveries</button>', 'folder') : empty('Start with the client’s actual brief.', 'Capture pages, content, design direction, behavior, constraints, and measurable requirements in one place.', button('Create a client brief', 'new-delivery', 'plus', 'subtle'), 'file')}`;
 }
-function missionForm() {
+function missionForm(aim = '') {
   const preferred = state.projects.find(p => p.available)?.id;
-  openDialog('Tell Ultharness your aim', `<form id="mission-form"><div class="form-content"><div class="brief-form-intro">${icon('spark')}<div><strong>Your aim is the starting point.</strong><p>The harness derives standards, builds, checks, reviews, and repairs while you watch.</p></div></div><label>What do you want to achieve?<textarea name="aim" rows="6" maxlength="16000" required autofocus placeholder="Build a complete website for my architecture client. Use the attached references, make it elegant and responsive, and make sure every interaction works."></textarea></label><label>References <span class="optional">optional</span><textarea name="references" rows="3" placeholder="https://example.com/design-reference\ndocs/client-brief.md"></textarea><small>One URL or project-relative document per line. Include design and content preferences in your aim.</small></label><label>Work in this project<select name="projectId">${options(state.projects, preferred)}</select><small>${e(state.projects.find(p => p.id === preferred)?.path || '')}</small></label><details class="mission-options"><summary>Run settings & connected tools</summary><label>Persistence<select name="runPolicy"><option value="persistent">Keep working · up to 100 repairs + 3 recovery attempts</option><option value="bounded">Short run · up to 3 repairs</option></select></label><label>Time budget (minutes)<input name="maxMinutes" type="number" min="1" max="1440" value="720" required><small>Progress is saved. Stops on a verified result, missing access, stalled progress, the time budget, or your Stop command.</small></label>${routingFields({ provider: 'direct' })}<fieldset class="connection-picker"><legend>Connected context and inspection tools</legend>${state.connections.filter(c => c.enabled).map(c => `<label class="checkbox-label"><input name="connectionIds" type="checkbox" value="${c.id}">${e(c.name)}</label>`).join('') || '<p>Add reusable tools and context under Connections.</p>'}</fieldset></details><p class="route-form-help mission-consent">Start authorizes planning, project edits, and finite local verification scripts derived from this aim, plus automatic repairs within the displayed run and time budgets. Uses an available coding agent and your selected model account; provider usage may be billed. Your references and files read by the agent go to that provider. Stop the cycle at any time. Passing work comes back for your acceptance.</p></div><div class="dialog-footer"><button type="button" class="button" data-action="close-dialog">Cancel</button><button type="submit" class="button primary">${icon('play')}Start & watch live</button></div></form>`, true);
+  openDialog('Tell Ultharness your aim', `<form id="mission-form"><div class="form-content"><div class="brief-form-intro">${icon('spark')}<div><strong>Your aim is the starting point.</strong><p>The harness derives standards, builds, checks, reviews, and repairs while you watch.</p></div></div><label>What do you want to achieve?<textarea name="aim" rows="6" maxlength="16000" required autofocus placeholder="Build a complete website for my architecture client. Use the attached references, make it elegant and responsive, and make sure every interaction works."></textarea></label><label>References <span class="optional">optional</span><textarea name="references" rows="3" placeholder="https://example.com/design-reference\ndocs/client-brief.md"></textarea><small>One URL or project-relative document per line. Include design and content preferences in your aim.</small></label><label>Work in this project<select name="projectId">${options(state.projects, preferred)}</select><small>${e(state.projects.find(p => p.id === preferred)?.path || '')}</small></label><details class="mission-options"><summary>Run settings & connected tools</summary><label>Persistence<select name="runPolicy"><option value="persistent">Keep working · up to 100 repairs + 3 recovery attempts</option><option value="bounded">Short run · up to 3 repairs</option></select></label><label>Time budget (minutes)<input name="maxMinutes" type="number" min="1" max="1440" value="720" required><small>Progress is saved. Stops on a verified result, missing access, stalled progress, the time budget, or your Stop command.</small></label>${routingFields({ provider: 'direct' })}<fieldset class="connection-picker"><legend>Connected context and inspection tools</legend>${state.connections.filter(c => c.enabled).map(c => `<label class="checkbox-label"><input name="connectionIds" type="checkbox" value="${c.id}">${e(c.name)}</label>`).join('') || '<p>Add reusable tools and context under Connections.</p>'}</fieldset></details>${newt ? '<label class="checkbox-label"><input name="rememberNewt" type="checkbox">Use this project, route, connections and limits when I say “start mission” to Newt.</label>' : ''}${newt && state.newtShortcut ? '<button type="button" class="text-button" data-action="forget-newt">Clear saved Newt mission settings</button>' : ''}<p class="route-form-help mission-consent">Start authorizes planning, project edits, and finite local verification scripts derived from this aim, plus automatic repairs within the displayed run and time budgets. Uses an available coding agent and your selected model account; provider usage may be billed. Your references and files read by the agent go to that provider. Stop the cycle at any time. Passing work comes back for your acceptance.</p></div><div class="dialog-footer"><button type="button" class="button" data-action="close-dialog">Cancel</button><button type="submit" class="button primary">${icon('play')}Start & watch live</button></div></form>`, true);
+  $('#mission-form').elements.aim.value = aim;
 }
 function livePage() {
   const d = state.deliveries.find(d => d.id === liveDeliveryId) || state.deliveries.find(d => d.mission) || state.deliveries[0];
@@ -590,6 +602,43 @@ function syncConnectionForm(form) {
 
 try {
   state = await api('state'); render();
+  if (newt) {
+    window.newtMission = async (kind, aim) => {
+      state = await api('state');
+      if (kind === 'stopAll') {
+        const stopped = await api('newt/stop-all', {});
+        await refresh(); closeDialog(); navigate('live');
+        return 'Stopped ' + stopped.deliveries + ' delivery cycles and ' + stopped.tasks + ' other tasks.';
+      }
+      if (kind === 'start') {
+        if (!state.newtShortcut || !aim) {
+          missionForm(aim);
+          return 'Choose the project and start the mission.';
+        }
+        try {
+          const delivery = await api('newt/missions', { aim });
+          liveDeliveryId = delivery.id;
+          sessionStorage.setItem('uh-live-delivery', delivery.id);
+          closeDialog(); await refresh(); navigate('live');
+          return 'Started ' + delivery.title;
+        } catch (error) { missionForm(aim); toast(error.message, true); return error.message; }
+      }
+      const active = state.deliveries.filter(d => d.mission && ['planning','building','checking','reviewing'].includes(d.status));
+      if (kind === 'stop' && active.length !== 1) {
+        closeDialog(); navigate('deliveries');
+        const message = active.length ? 'Choose which mission to stop.' : 'There is no active mission to stop.';
+        toast(message); return message;
+      }
+      const delivery = active.find(d => d.id === liveDeliveryId) || active[0] || state.deliveries.find(d => d.mission);
+      closeDialog();
+      if (!delivery) { navigate('live'); return 'No missions yet.'; }
+      liveDeliveryId = delivery.id; sessionStorage.setItem('uh-live-delivery', delivery.id);
+      if (kind === 'stop') { await api('deliveries/' + delivery.id + '/pause', {}); await refresh(); }
+      navigate('live');
+      return delivery.title + ' · ' + (kind === 'stop' ? 'paused' : delivery.status);
+    };
+    newt.postMessage('ready');
+  }
   const stream = new EventSource('/api/events');
   stream.onmessage = () => { connected = true; if (!refreshTimer) refreshTimer = setTimeout(() => { refreshTimer = null; refresh(); }, 150); };
   stream.onerror = () => { connected = false; render(); };

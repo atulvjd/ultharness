@@ -1,6 +1,6 @@
 {
   "name": "ultharness",
-  "version": "0.5.0",
+  "version": "0.14.1",
   "private": true,
   "type": "module",
   "description": "A local workspace for coding agents and recurring operations.",

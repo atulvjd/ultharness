@@ -42,32 +42,29 @@ try {
   symlinkSync('lib/node_modules/npm/bin/npm-cli.js', path.join(resources, 'runtime/npm'));
   symlinkSync('lib/node_modules/npm/bin/npx-cli.js', path.join(resources, 'runtime/npx'));
   cpSync(license, path.join(resources, 'licenses/Node-LICENSE.txt'));
-  writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleName</key><string>Ultharness</string>
-<key>CFBundleDisplayName</key><string>Ultharness</string>
-<key>CFBundleIdentifier</key><string>local.ultharness.desktop</string>
-<key>CFBundleExecutable</key><string>Ultharness</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>${pkg.version}</string>
-<key>CFBundleVersion</key><string>${pkg.version}</string>
-<key>CFBundleIconFile</key><string>Ultharness.icns</string>
-<key>LSMinimumSystemVersion</key><string>${minimum}</string>
-<key>NSHighResolutionCapable</key><true/>
-<key>NSPrincipalClass</key><string>NSApplication</string>
-<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
-<key>NSHumanReadableCopyright</key><string>Ultharness</string>
-</dict></plist>`);
+  const native = path.join(root, 'newt');
+  const scratch = process.env.ULTHARNESS_SWIFT_BUILD_DIR || path.join(native, '.build');
+  const swiftArgs = ['build', '--package-path', native, '--scratch-path', scratch, '-c', 'release'];
+  run('/usr/bin/swift', swiftArgs);
+  const bin = spawnSync('/usr/bin/swift', [...swiftArgs, '--show-bin-path'], {encoding: 'utf8'});
+  if (bin.status !== 0) throw new Error('Could not locate the compiled Newt binaries.');
+  const binaryDir = bin.stdout.trim();
+  run(path.join(binaryDir, 'Newtv1CoreChecks'), [], { NEWTV1_SCREEN_READER_PATH: path.join(binaryDir, 'Newtv1ScreenReader') });
+  for (const file of ['Newtv1', 'Newtv1BrowserHost', 'Newtv1ScreenReader', 'Newtv1Setup']) {
+    const destination = path.join(contents, 'MacOS', file);
+    cpSync(path.join(binaryDir, file), destination);
+    chmodSync(destination, 0o755);
+    if (file !== 'Newtv1') run('/usr/bin/codesign', ['--force', '--sign', '-', destination]);
+  }
+  cpSync(path.join(native, 'Resources/Info.plist'), path.join(contents, 'Info.plist'));
+  run('/usr/libexec/PlistBuddy', ['-c', 'Set :CFBundleShortVersionString ' + pkg.version, path.join(contents, 'Info.plist')]);
   writeFileSync(path.join(contents, 'PkgInfo'), 'APPL????');
   const cache = path.join(work, 'module-cache'); mkdirSync(cache);
-  console.log('Compiling native macOS window…');
-  run('/usr/bin/xcrun', ['swiftc', '-parse-as-library', '-swift-version', '5', '-O', '-target', `${arch}-apple-macosx${minimum}`, '-module-cache-path', cache, '-framework', 'AppKit', '-framework', 'WebKit', path.join(root, 'desktop/Ultharness.swift'), '-o', path.join(contents, 'MacOS/Ultharness')]);
   const iconset = path.join(work, 'Ultharness.iconset');
   run('/usr/bin/xcrun', ['swift', '-module-cache-path', cache, path.join(root, 'desktop/make-icon.swift'), iconset]);
   run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', path.join(resources, 'Ultharness.icns')]);
   // Leave the official Node binary's signature and JIT entitlements intact.
-  run('/usr/bin/codesign', ['--force', '--sign', '-', app]);
+  run('/usr/bin/codesign', ['--force', '--sign', '-', '--entitlements', path.join(native, 'Resources/Newtv1.entitlements'), app]);
   run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
   run(path.join(resources, 'runtime/node'), ['--version']);
   run(path.join(resources, 'runtime/node'), [path.join(resources, 'runtime/lib/node_modules/npm/bin/npm-cli.js'), '--version']);
@@ -85,6 +82,11 @@ try {
   run('/usr/bin/ditto', [app, path.join(image, 'Ultharness.app')]);
   symlinkSync('/Applications', path.join(image, 'Applications'));
   cpSync(path.join(root, 'desktop/INSTALL.txt'), path.join(image, 'Read Me.txt'));
+  const integration = path.join(image, 'Extras/Browser Integration');
+  mkdirSync(path.join(integration, 'scripts'), { recursive: true });
+  cpSync(path.join(native, 'browser-extension'), path.join(integration, 'browser-extension'), { recursive: true });
+  cpSync(path.join(native, 'scripts/install-browser-host.sh'), path.join(integration, 'scripts/install-browser-host.sh'));
+  cpSync(path.join(native, 'docs/DMG_BROWSER_SETUP.txt'), path.join(integration, 'README.txt'));
   const name = `Ultharness-${pkg.version}-${process.arch === 'arm64' ? 'arm64' : 'x64'}.dmg`;
   const dmg = path.join(output, name);
   console.log('Creating drag-to-Applications disk image…');
