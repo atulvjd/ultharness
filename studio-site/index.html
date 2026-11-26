@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Studio — Design Portfolio</title>
+  <meta name="description" content="Independent design studio website">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header" aria-label="Main header">
+    <nav class="nav-wrap" aria-label="Primary navigation">
+      <a class="logo" href="/"><span class="logo-type">Studio</span></a>
+      <ul class="nav-links" aria-label="Navigation links">
+        <li><a href="#work" class="nav-link">Work</a></li>
+        <li><a href="#about" class="nav-link">About</a></li>
+        <li><a href="#contact" class="nav-link primary-cta">Contact</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" aria-labelledby="page-title">
+    <h1 id="page-title" class="visually-hidden">Studio website</h1>
+
+    <section class="hero section-wrap">
+      <div class="hero-content">
+        <h2 class="hero-title">Craft meaningful experiences.</h2>
+        <p class="hero-description">A design studio focused on thoughtful branding, digital products, and visual strategy for forward-thinking companies.</p>
+        <div class="hero-actions">
+          <a href="#contact" class="button primary">Get in touch</a>
+          <a href="#work" class="button secondary">View work</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="work section-wrap" id="work">
+      <div class="section-heading">
+        <h2>Work</h2>
+        <p>Selected projects that demonstrate our approach to design strategy and execution.</p>
+      </div>
+      <div class="work-grid">
+        <!-- Project cards will be populated -->
+        <article class="work-item">
+          <div class="work-item-image placeholder" aria-label="Project placeholder: branding identity">
+            <svg aria-hidden="true" width="400" height="300">
+              <rect width="400" height="300" fill="#e8e4dc"/>
+              <text x="200" y="150" fill="#8a8a8a" font-size="14" text-anchor="middle">Project Preview</text>
+            </svg>
+          </div>
+          <div class="work-item-content">
+            <h3 class="work-item-title">Brand Identity</h3>
+            <p class="work-item-desc">Complete visual identity system for a tech startup.</p>
+          </div>
+        </article>
+        <article class="work-item">
+          <div class="work-item-image placeholder" aria-label="Project placeholder: web design">
+            <svg aria-hidden="true" width="400" height="300">
+              <rect width="400" height="300" fill="#e8e4dc"/>
+              <text x="200" y="150" fill="#8a8a8a" font-size="14" text-anchor="middle">Project Preview</text>
+            </svg>
+          </div>
+          <div class="work-item-content">
+            <h3 class="work-item-title">Web Platform</h3>
+            <p class="work-item-dec">Custom website with animated interactions and responsive design.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="about section-wrap" id="about">
+      <div class="section-heading">
+        <h2>About</h2>
+        <p>Meet the team behind the designs.</p>
+      </div>
+      <div class="about-content">
+        <div class="about-text">
+          <h3>Who we are</h3>
+          <p>We're a small team of designers and strategists passionate about creating work that lasts. Based in [city], we collaborate with clients who value thoughtful design and clear communication.</p>
+          <p>Our approach combines research, strategy, and craft to deliver designs that solve real problems and connect with audiences.</p>
+        </div>
+        <div class="about-stats">
+          <div class="stat-item">
+            <div class="stat-number">12+</div>
+            <div class="stat-label">Years experience</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number">45+</div>
+            <div class="stat-label">Projects completed</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number">5</div>
+            <div class="stat-label">Disciplines</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="contact section-wrap" id="contact">
+      <div class="section-heading">
+        <h2>Contact</h2>
+        <p>Let's discuss your project.</p>
+      </div>
+      <form class="contact-form" aria-label="Contact form">
+        <div class="form-group">
+          <label for="name" class="form-label">Full name</label>
+          <input type="text" id="name" name="name" class="form-input" required aria-required="true" placeholder="Your full name">
+        </div>
+        <div class="form-group">
+          <label for="email" class="form-label">Email address</label>
+          <input type="email" id="email" name="email" class="form-input" required aria-required="true" email placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label for="project" class="form-label">Project type</label>
+          <select id="project" name="project" class="form-select" aria-label="Project type">
+            <option value="" disabled selected>Select project type</option>
+            <option value="branding">Branding identity</option>
+            <option value="web">Website & digital</option>
+            <option value="product">Product design</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="message" class="form-label">Message</label>
+          <textarea id="message" name="message" class="form-textarea" rows="3" aria-required="true" placeholder="Tell us about your project"></textarea>
+        </div>
+        <button type="submit" class="button primary">Send message</button>
+      </form>
+      <div class="contact-info">
+        <h3>Get in touch</h3>
+        <address>
+          <p><strong>Location:</strong> [City, State]</p>
+          <p><strong>Email:</strong> hello@studio.example</p>
+          <p><strong>Response time:</strong> Within 3 business days</p>
+        </address>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" aria-label="Site footer">
+    <div class="footer-nav">
+      <a href="#work">Work</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </div>
+    <p class="footer-copyright">2024 Studio. All rights reserved.</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
