@@ -1,8 +1,0 @@
-.build/
-dist/
-.DS_Store
-.swiftpm/
-.env
-.env.*
-!.env.example
-*.key
